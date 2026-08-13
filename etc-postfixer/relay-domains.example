@@ -1,0 +1,5 @@
+# Domains this node is allowed to relay for.
+# Relay-only nodes normally list the domains hosted by the final inout server.
+# One domain per line.
+
+example.com
