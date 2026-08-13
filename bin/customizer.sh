@@ -149,11 +149,17 @@ load_postfixer_config() {
 
 relay_endpoint_host() {
     local endpoint="$1"
+    local host
+
     endpoint="${endpoint%%[[:space:]]*}"
-    endpoint="${endpoint#[}"
-    endpoint="${endpoint%%]*}"
-    endpoint="${endpoint%%:*}"
-    printf '%s\n' "$endpoint"
+    if [[ "$endpoint" == \[*\]* ]]; then
+        host="${endpoint#\[}"
+        host="${host%%\]*}"
+    else
+        host="${endpoint%%:*}"
+    fi
+
+    printf '%s\n' "$host"
 }
 
 validate_node_routes() {
@@ -200,7 +206,7 @@ configure_postfix_node() {
 
     log "Applying Postfixer node profile: ${POSTFIXER_ROLE}"
 
-    postconf_set smtpd_banner '\$myhostname ESMTP \$mail_name'
+    postconf_set smtpd_banner '$myhostname ESMTP $mail_name'
     postconf_set myorigin /etc/mailname
     postconf_set mynetworks "$POSTFIXER_NETWORKS_FILE"
     postconf_set relayhost "$POSTFIXER_RELAYHOST"
@@ -230,7 +236,9 @@ configure_postfix_node() {
 
     case "$POSTFIXER_ROLE" in
         inout)
-            postconf_set mydestination '\$myhostname, localhost.\$mydomain, localhost, /etc/postfixer/local-domains'
+            postconf_set mydestination '$myhostname, localhost.$mydomain, localhost, /etc/postfixer/local-domains'
+            postconf_set local_recipient_maps 'proxy:unix:passwd.byname $alias_maps'
+            postconf_set local_transport 'local:$myhostname'
             postconf_set home_mailbox Maildir/
             postconf_set mailbox_command '/usr/bin/procmail -a "$EXTENSION" DEFAULT=$HOME/Maildir/ MAILDIR=$HOME/Maildir'
             postconf_set smtpd_sasl_auth_enable yes
@@ -288,6 +296,10 @@ configure_opendkim_node() {
     set_opendkim_directive "$conf" Socket inet:18891@localhost
     set_opendkim_directive "$conf" OversignHeaders From
 
+    if [[ -r /usr/share/dns/root.key ]]; then
+        set_opendkim_directive "$conf" TrustAnchorFile /usr/share/dns/root.key
+    fi
+
     {
         printf '127.0.0.1\n::1\nlocalhost\n%s\n' "$POSTFIXER_HOSTNAME"
         [[ -n "$POSTFIXER_MAIL_DOMAIN" ]] && printf '%s\n' "$POSTFIXER_MAIL_DOMAIN"
@@ -330,6 +342,8 @@ apply_postfix_configuration() {
 
 deploy_courier_certificate() {
     load_postfixer_config
+    configure_postfix_node
+
     if [[ "$POSTFIXER_ROLE" == relay ]]; then
         if systemctl is-active --quiet postfix.service 2>/dev/null; then
             postfix check
@@ -337,6 +351,7 @@ deploy_courier_certificate() {
         fi
         return 0
     fi
+
     postfixer_common_deploy_courier_certificate "$@"
 }
 
