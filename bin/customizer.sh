@@ -75,8 +75,8 @@ EOF_INTRO
     role="$(prompt_value 'Node role (inout/relay)' 'inout')"
     hostname_value="$(prompt_value 'SMTP/server hostname' "$detected_hostname")"
     mail_domain="$(prompt_value 'Default mail domain' "$detected_domain")"
-    relayhost="$(prompt_optional 'Primary outbound relay in Postfix syntax, for example [relay-2.example.com]:587 (blank = direct delivery)')"
-    fallbacks="$(prompt_optional 'Fallback outbound relays separated by spaces, for example [relay-3.example.com]:587 [relay-4.example.com]:587')"
+    relayhost="$(prompt_optional 'Primary outbound relay in Postfix syntax, for example [relay-2.example.com] (blank = direct delivery)')"
+    fallbacks="$(prompt_optional 'Fallback outbound relays separated by spaces, for example [relay-3.example.com] [relay-4.example.com]')"
     cert_domain="$(prompt_value 'Certificate domain under /etc/letsencrypt/live' "$hostname_value")"
 
     {
