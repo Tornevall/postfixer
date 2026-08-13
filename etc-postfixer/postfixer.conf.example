@@ -1,0 +1,26 @@
+# Postfixer node configuration.
+# Installed as /etc/postfixer/postfixer.conf by the interactive customizer.
+
+# inout = inbound/outbound final delivery server with Maildir, Courier and SMTP AUTH
+# relay = relay helper only, with no local Maildir/IMAP/POP delivery
+POSTFIXER_ROLE=inout
+
+# SMTP identity. Postfixer applies this as the system hostname so Postfix can use
+# its normal $myhostname default without putting a server-specific hostname in
+# the repository main.cf.
+POSTFIXER_HOSTNAME=mail.example.com
+POSTFIXER_MAIL_DOMAIN=example.com
+
+# Use Postfix destination syntax. Leave empty for direct Internet delivery.
+POSTFIXER_RELAYHOST=
+POSTFIXER_FALLBACK_RELAYS=
+
+# Certificate is managed externally and synchronized below /etc/letsencrypt.
+POSTFIXER_CERT_DOMAIN=mail.example.com
+
+POSTFIXER_NETWORKS_FILE=/etc/postfixer/networks
+POSTFIXER_LOCAL_DOMAINS_FILE=/etc/postfixer/local-domains
+POSTFIXER_RELAY_DOMAINS_FILE=/etc/postfixer/relay-domains
+POSTFIXER_RELAY_RECIPIENTS_FILE=/etc/postfixer/relay-recipients
+POSTFIXER_TRANSPORT_FILE=/etc/postfixer/transport
+POSTFIXER_DKIM_DIR=/etc/opendkim
