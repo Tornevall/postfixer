@@ -8,26 +8,26 @@ CERT_DOMAIN ?=
 .PHONY: install apply maps aliases cert check restart reload help
 
 install:
-	@CERT_DOMAIN="$(CERT_DOMAIN)" $(INSTALLER)
+	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
 
 apply:
-	@$(INSTALLER) --apply
+	@bash $(INSTALLER) --apply
 
 maps:
-	@$(INSTALLER) --maps
+	@bash $(INSTALLER) --maps
 
 aliases:
 	@newaliases
 	@systemctl reload postfix.service
 
 cert:
-	@CERT_DOMAIN="$(CERT_DOMAIN)" $(INSTALLER) --cert
+	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER) --cert
 
 check:
-	@$(INSTALLER) --check
+	@bash $(INSTALLER) --check
 
 restart:
-	@$(INSTALLER) --restart
+	@bash $(INSTALLER) --restart
 
 reload:
 	@postfix check
