@@ -1,0 +1,452 @@
+#!/usr/bin/env bash
+# Node-specific Postfixer customization.
+# This file is sourced after common.sh and overrides selected shared functions.
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    printf 'ERROR: Run bin/install.sh.\n' >&2
+    exit 64
+fi
+
+POSTFIXER_ETC="${POSTFIXER_ETC:-/etc/postfixer}"
+POSTFIXER_CONFIG="${POSTFIXER_CONFIG:-${POSTFIXER_ETC}/postfixer.conf}"
+POSTFIXER_CONFIG_SOURCE="${POSTFIXER_CONFIG_SOURCE:-${ROOT_DIR}/etc-postfixer}"
+
+# Preserve shared implementations before overriding them.
+eval "$(declare -f install_courier_from_archive | sed '1s/install_courier_from_archive/postfixer_common_install_courier_from_archive/')"
+eval "$(declare -f build_courier_for_noble | sed '1s/build_courier_for_noble/postfixer_common_build_courier_for_noble/')"
+eval "$(declare -f deploy_courier_certificate | sed '1s/deploy_courier_certificate/postfixer_common_deploy_courier_certificate/')"
+eval "$(declare -f apply_postfix_configuration | sed '1s/apply_postfix_configuration/postfixer_common_apply_postfix_configuration/')"
+
+config_write() {
+    local key="$1"
+    local value="$2"
+    printf '%s=%q\n' "$key" "$value"
+}
+
+prompt_value() {
+    local prompt="$1"
+    local default_value="$2"
+    local value=""
+
+    if [[ -t 0 ]]; then
+        read -r -p "${prompt} [${default_value}]: " value
+    fi
+
+    printf '%s\n' "${value:-$default_value}"
+}
+
+prompt_optional() {
+    local prompt="$1"
+    local value=""
+
+    if [[ -t 0 ]]; then
+        read -r -p "${prompt}: " value
+    fi
+
+    printf '%s\n' "$value"
+}
+
+create_postfixer_config() {
+    local detected_hostname detected_domain role hostname_value mail_domain relayhost fallbacks cert_domain
+
+    install -d -m 0755 "$POSTFIXER_ETC"
+
+    detected_hostname="$(hostname -f 2>/dev/null || hostname)"
+    if [[ "$detected_hostname" == *.* ]]; then
+        detected_domain="${detected_hostname#*.}"
+    else
+        detected_domain="localdomain"
+    fi
+
+    if [[ ! -t 0 ]]; then
+        die "Missing ${POSTFIXER_CONFIG}. Run the installer interactively once or create the file from etc-postfixer/postfixer.conf.example."
+    fi
+
+    cat <<'EOF_INTRO'
+
+Postfixer node customizer
+
+Choose one role:
+  inout  - complete inbound/outbound server with local Maildir, SMTP AUTH and Courier
+  relay  - relay helper only; no local Maildir delivery and no IMAP/POP service
+
+EOF_INTRO
+
+    role="$(prompt_value 'Node role (inout/relay)' 'inout')"
+    hostname_value="$(prompt_value 'SMTP/server hostname' "$detected_hostname")"
+    mail_domain="$(prompt_value 'Default mail domain' "$detected_domain")"
+    relayhost="$(prompt_optional 'Primary outbound relay in Postfix syntax, for example [relay-2.example.com]:587 (blank = direct delivery)')"
+    fallbacks="$(prompt_optional 'Fallback outbound relays separated by spaces, for example [relay-3.example.com]:587 [relay-4.example.com]:587')"
+    cert_domain="$(prompt_value 'Certificate domain under /etc/letsencrypt/live' "$hostname_value")"
+
+    {
+        printf '# Postfixer node configuration. This file is the source of truth for server-specific settings.\n'
+        config_write POSTFIXER_ROLE "$role"
+        config_write POSTFIXER_HOSTNAME "$hostname_value"
+        config_write POSTFIXER_MAIL_DOMAIN "$mail_domain"
+        config_write POSTFIXER_RELAYHOST "$relayhost"
+        config_write POSTFIXER_FALLBACK_RELAYS "$fallbacks"
+        config_write POSTFIXER_CERT_DOMAIN "$cert_domain"
+        config_write POSTFIXER_NETWORKS_FILE "${POSTFIXER_ETC}/networks"
+        config_write POSTFIXER_LOCAL_DOMAINS_FILE "${POSTFIXER_ETC}/local-domains"
+        config_write POSTFIXER_RELAY_DOMAINS_FILE "${POSTFIXER_ETC}/relay-domains"
+        config_write POSTFIXER_RELAY_RECIPIENTS_FILE "${POSTFIXER_ETC}/relay-recipients"
+        config_write POSTFIXER_TRANSPORT_FILE "${POSTFIXER_ETC}/transport"
+        config_write POSTFIXER_DKIM_DIR "/etc/opendkim"
+    } > "$POSTFIXER_CONFIG"
+
+    chmod 0644 "$POSTFIXER_CONFIG"
+    log "Created ${POSTFIXER_CONFIG}"
+}
+
+install_postfixer_data_file() {
+    local target="$1"
+    local example="$2"
+
+    [[ -e "$target" ]] && return 0
+    install -d -m 0755 "$(dirname "$target")"
+
+    if [[ -f "${POSTFIXER_CONFIG_SOURCE}/${example}" ]]; then
+        install -m 0644 "${POSTFIXER_CONFIG_SOURCE}/${example}" "$target"
+    else
+        : > "$target"
+        chmod 0644 "$target"
+    fi
+}
+
+load_postfixer_config() {
+    [[ -f "$POSTFIXER_CONFIG" ]] || create_postfixer_config
+
+    # shellcheck disable=SC1090
+    source "$POSTFIXER_CONFIG"
+
+    POSTFIXER_ROLE="${POSTFIXER_ROLE:-inout}"
+    POSTFIXER_HOSTNAME="${POSTFIXER_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}"
+    POSTFIXER_MAIL_DOMAIN="${POSTFIXER_MAIL_DOMAIN:-${POSTFIXER_HOSTNAME#*.}}"
+    POSTFIXER_RELAYHOST="${POSTFIXER_RELAYHOST:-}"
+    POSTFIXER_FALLBACK_RELAYS="${POSTFIXER_FALLBACK_RELAYS:-}"
+    POSTFIXER_CERT_DOMAIN="${POSTFIXER_CERT_DOMAIN:-$POSTFIXER_HOSTNAME}"
+    POSTFIXER_NETWORKS_FILE="${POSTFIXER_NETWORKS_FILE:-${POSTFIXER_ETC}/networks}"
+    POSTFIXER_LOCAL_DOMAINS_FILE="${POSTFIXER_LOCAL_DOMAINS_FILE:-${POSTFIXER_ETC}/local-domains}"
+    POSTFIXER_RELAY_DOMAINS_FILE="${POSTFIXER_RELAY_DOMAINS_FILE:-${POSTFIXER_ETC}/relay-domains}"
+    POSTFIXER_RELAY_RECIPIENTS_FILE="${POSTFIXER_RELAY_RECIPIENTS_FILE:-${POSTFIXER_ETC}/relay-recipients}"
+    POSTFIXER_TRANSPORT_FILE="${POSTFIXER_TRANSPORT_FILE:-${POSTFIXER_ETC}/transport}"
+    POSTFIXER_DKIM_DIR="${POSTFIXER_DKIM_DIR:-/etc/opendkim}"
+
+    case "$POSTFIXER_ROLE" in
+        inout|relay) ;;
+        *) die "Invalid POSTFIXER_ROLE=${POSTFIXER_ROLE}. Supported roles: inout, relay." ;;
+    esac
+
+    install_postfixer_data_file "$POSTFIXER_NETWORKS_FILE" networks.example
+    install_postfixer_data_file "$POSTFIXER_LOCAL_DOMAINS_FILE" local-domains.example
+    install_postfixer_data_file "$POSTFIXER_RELAY_DOMAINS_FILE" relay-domains.example
+    install_postfixer_data_file "$POSTFIXER_RELAY_RECIPIENTS_FILE" relay-recipients.example
+    install_postfixer_data_file "$POSTFIXER_TRANSPORT_FILE" transport.example
+
+    CERT_DOMAIN="$POSTFIXER_CERT_DOMAIN"
+}
+
+relay_endpoint_host() {
+    local endpoint="$1"
+    endpoint="${endpoint%%[[:space:]]*}"
+    endpoint="${endpoint#[}"
+    endpoint="${endpoint%%]*}"
+    endpoint="${endpoint%%:*}"
+    printf '%s\n' "$endpoint"
+}
+
+validate_node_routes() {
+    local endpoint host
+
+    for endpoint in "$POSTFIXER_RELAYHOST" $POSTFIXER_FALLBACK_RELAYS; do
+        [[ -n "$endpoint" ]] || continue
+        host="$(relay_endpoint_host "$endpoint")"
+        if [[ "$host" == "$POSTFIXER_HOSTNAME" ]]; then
+            die "Node ${POSTFIXER_HOSTNAME} cannot use itself as relay destination: ${endpoint}"
+        fi
+    done
+}
+
+configure_system_identity() {
+    log "Configuring node identity: ${POSTFIXER_HOSTNAME}"
+
+    printf '%s\n' "$POSTFIXER_MAIL_DOMAIN" > /etc/mailname
+
+    if command -v hostnamectl >/dev/null 2>&1; then
+        hostnamectl set-hostname "$POSTFIXER_HOSTNAME"
+    else
+        printf '%s\n' "$POSTFIXER_HOSTNAME" > /etc/hostname
+        hostname "$POSTFIXER_HOSTNAME"
+    fi
+
+    # Keep myhostname server-specific without storing it in the repository main.cf.
+    # Postfix will use the system FQDN when myhostname is not explicitly configured.
+    sed -i -E '/^[[:space:]]*myhostname[[:space:]]*=/d' /etc/postfix/main.cf
+}
+
+postconf_set() {
+    local key="$1"
+    local value="$2"
+    postconf -e "${key} = ${value}"
+}
+
+configure_postfix_node() {
+    local relay_recipients=""
+
+    load_postfixer_config
+    validate_node_routes
+    configure_system_identity
+
+    log "Applying Postfixer node profile: ${POSTFIXER_ROLE}"
+
+    postconf_set smtpd_banner '\$myhostname ESMTP \$mail_name'
+    postconf_set myorigin /etc/mailname
+    postconf_set mynetworks "$POSTFIXER_NETWORKS_FILE"
+    postconf_set relayhost "$POSTFIXER_RELAYHOST"
+    postconf_set smtp_fallback_relay "$POSTFIXER_FALLBACK_RELAYS"
+    postconf_set relay_domains "$POSTFIXER_RELAY_DOMAINS_FILE"
+    postconf_set transport_maps "hash:${POSTFIXER_TRANSPORT_FILE}"
+    postconf_set smtpd_relay_restrictions 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination'
+    postconf_set smtpd_recipient_restrictions 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, check_policy_service inet:127.0.0.1:10023, check_policy_service unix:private/policyd-spf'
+    postconf_set milter_default_action accept
+    postconf_set milter_protocol 6
+    postconf_set smtpd_milters inet:127.0.0.1:18891
+    postconf_set non_smtpd_milters inet:127.0.0.1:18891
+    postconf_set smtp_tls_security_level may
+    postconf_set smtpd_tls_security_level may
+
+    if [[ -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem" && -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/privkey.pem" ]]; then
+        postconf_set smtpd_tls_cert_file "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem"
+        postconf_set smtpd_tls_key_file "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/privkey.pem"
+    else
+        warn "Certificate for ${POSTFIXER_CERT_DOMAIN} is not present yet under /etc/letsencrypt/live."
+    fi
+
+    if grep -qEv '^[[:space:]]*(#|$)' "$POSTFIXER_RELAY_RECIPIENTS_FILE"; then
+        relay_recipients="hash:${POSTFIXER_RELAY_RECIPIENTS_FILE}"
+    fi
+    postconf_set relay_recipient_maps "$relay_recipients"
+
+    case "$POSTFIXER_ROLE" in
+        inout)
+            postconf_set mydestination '\$myhostname, localhost.\$mydomain, localhost, /etc/postfixer/local-domains'
+            postconf_set home_mailbox Maildir/
+            postconf_set mailbox_command '/usr/bin/procmail -a "$EXTENSION" DEFAULT=$HOME/Maildir/ MAILDIR=$HOME/Maildir'
+            postconf_set smtpd_sasl_auth_enable yes
+            ;;
+        relay)
+            postconf_set mydestination ''
+            postconf_set local_recipient_maps ''
+            postconf_set local_transport 'error:local mail delivery is disabled'
+            postconf_set home_mailbox ''
+            postconf_set mailbox_command ''
+            postconf_set smtpd_sasl_auth_enable no
+
+            if [[ -z "$relay_recipients" ]]; then
+                warn "Relay profile has no relay-recipient map. Public MX relays should synchronize valid recipients from the final delivery server to avoid backscatter."
+            fi
+            ;;
+    esac
+}
+
+set_opendkim_directive() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+
+    touch "$file"
+    if grep -qE "^[[:space:]]*${key}[[:space:]]+" "$file"; then
+        sed -i -E "s|^[[:space:]]*${key}[[:space:]]+.*|${key} ${value}|" "$file"
+    else
+        printf '%s %s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+configure_opendkim_node() {
+    local conf=/etc/opendkim.conf trusted="${POSTFIXER_DKIM_DIR}/trusted.hosts" line
+
+    log "Configuring OpenDKIM signing and verification"
+    install -d -o opendkim -g opendkim -m 0750 "$POSTFIXER_DKIM_DIR"
+    install -d -o opendkim -g opendkim -m 0700 "${POSTFIXER_DKIM_DIR}/keys"
+    touch "${POSTFIXER_DKIM_DIR}/key.table" "${POSTFIXER_DKIM_DIR}/signing.table" "$trusted"
+
+    set_opendkim_directive "$conf" Syslog yes
+    set_opendkim_directive "$conf" UMask 007
+    set_opendkim_directive "$conf" UserID opendkim
+    set_opendkim_directive "$conf" KeyTable "${POSTFIXER_DKIM_DIR}/key.table"
+    set_opendkim_directive "$conf" SigningTable "refile:${POSTFIXER_DKIM_DIR}/signing.table"
+    set_opendkim_directive "$conf" ExternalIgnoreList "$trusted"
+    set_opendkim_directive "$conf" InternalHosts "$trusted"
+    set_opendkim_directive "$conf" Canonicalization relaxed/relaxed
+    set_opendkim_directive "$conf" Mode sv
+    set_opendkim_directive "$conf" SubDomains no
+    set_opendkim_directive "$conf" AutoRestart yes
+    set_opendkim_directive "$conf" AutoRestartRate 10/1M
+    set_opendkim_directive "$conf" DNSTimeout 5
+    set_opendkim_directive "$conf" SignatureAlgorithm rsa-sha256
+    set_opendkim_directive "$conf" Socket inet:18891@localhost
+    set_opendkim_directive "$conf" OversignHeaders From
+
+    {
+        printf '127.0.0.1\n::1\nlocalhost\n%s\n' "$POSTFIXER_HOSTNAME"
+        [[ -n "$POSTFIXER_MAIL_DOMAIN" ]] && printf '%s\n' "$POSTFIXER_MAIL_DOMAIN"
+        while IFS= read -r line; do
+            line="${line%%#*}"
+            line="$(printf '%s' "$line" | xargs)"
+            [[ -n "$line" ]] && printf '%s\n' "$line"
+        done < "$POSTFIXER_NETWORKS_FILE"
+    } | awk '!seen[$0]++' > "${trusted}.tmp"
+
+    install -o opendkim -g opendkim -m 0640 "${trusted}.tmp" "$trusted"
+    rm -f "${trusted}.tmp"
+    chown opendkim:opendkim "${POSTFIXER_DKIM_DIR}/key.table" "${POSTFIXER_DKIM_DIR}/signing.table"
+    chmod 0640 "${POSTFIXER_DKIM_DIR}/key.table" "${POSTFIXER_DKIM_DIR}/signing.table"
+    find "${POSTFIXER_DKIM_DIR}/keys" -type f -name '*.private' -exec chown opendkim:opendkim {} + -exec chmod 0600 {} + 2>/dev/null || true
+}
+
+install_courier_from_archive() {
+    load_postfixer_config
+    if [[ "$POSTFIXER_ROLE" == relay ]]; then
+        log "Relay profile selected - skipping Courier IMAP/POP packages"
+        return 0
+    fi
+    postfixer_common_install_courier_from_archive "$@"
+}
+
+build_courier_for_noble() {
+    load_postfixer_config
+    if [[ "$POSTFIXER_ROLE" == relay ]]; then
+        log "Relay profile selected - skipping Courier build"
+        return 0
+    fi
+    postfixer_common_build_courier_for_noble "$@"
+}
+
+apply_postfix_configuration() {
+    postfixer_common_apply_postfix_configuration "$@"
+    configure_postfix_node
+}
+
+deploy_courier_certificate() {
+    load_postfixer_config
+    if [[ "$POSTFIXER_ROLE" == relay ]]; then
+        if systemctl is-active --quiet postfix.service 2>/dev/null; then
+            postfix check
+            systemctl reload postfix.service
+        fi
+        return 0
+    fi
+    postfixer_common_deploy_courier_certificate "$@"
+}
+
+enable_and_restart_services() {
+    local service
+    local services=(postgrey opendkim opendmarc clamav-daemon spamassassin spamd postfix)
+
+    load_postfixer_config
+
+    if [[ "$POSTFIXER_ROLE" == inout ]]; then
+        services+=(saslauthd courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl)
+    fi
+
+    log "Enabling and restarting services for ${POSTFIXER_ROLE} profile"
+    for service in "${services[@]}"; do
+        if service_exists "$service"; then
+            systemctl enable "$service.service" >/dev/null 2>&1 || true
+            systemctl restart "$service.service"
+        fi
+    done
+
+    if [[ "$POSTFIXER_ROLE" == relay ]]; then
+        for service in courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl saslauthd; do
+            service_exists "$service" && systemctl disable --now "$service.service" >/dev/null 2>&1 || true
+        done
+    fi
+}
+
+check_mail_stack() {
+    local failed=0 service
+    local services=(postfix postgrey opendkim opendmarc)
+
+    load_postfixer_config
+    log "Checking ${POSTFIXER_ROLE} mail stack"
+
+    postfix check
+    postconf -n >/dev/null
+
+    if [[ "$POSTFIXER_ROLE" == inout ]]; then
+        services+=(saslauthd courier-authdaemon courier-imap)
+        if [[ ! -S /var/spool/postfix/var/run/saslauthd/mux ]]; then
+            warn "saslauthd mux socket is missing from the Postfix chroot."
+            failed=1
+        fi
+    fi
+
+    for service in "${services[@]}"; do
+        if service_exists "$service" && ! systemctl is-active --quiet "$service.service"; then
+            warn "Service is not active: ${service}"
+            failed=1
+        fi
+    done
+
+    if command -v ss >/dev/null 2>&1; then
+        printf '\nListening mail ports:\n'
+        ss -ltnp 2>/dev/null | awk 'NR == 1 || $4 ~ /:(25|110|143|465|587|993|995)$/' || true
+    fi
+
+    [[ "$failed" -eq 0 ]] || die "Mail stack check failed."
+    log "Mail stack check passed"
+}
+
+full_install() {
+    local postfix_preexisting=no
+
+    require_root
+    load_os
+    load_postfixer_config
+    validate_node_routes
+
+    [[ -f /etc/postfix/main.cf ]] && postfix_preexisting=yes
+
+    log "Postfixer - Ubuntu ${UBUNTU_VERSION} (${ARCH}), role ${POSTFIXER_ROLE}"
+    if [[ "$postfix_preexisting" == yes ]]; then
+        log "Existing /etc/postfix/main.cf detected - treating Postfix as an existing installation"
+    else
+        log "No /etc/postfix/main.cf detected - Postfix will be installed as part of the stack"
+    fi
+
+    backup_existing_configuration
+    run_release_install
+
+    if [[ "$POSTFIXER_ROLE" == inout ]]; then
+        configure_courier
+        configure_saslauthd
+    fi
+
+    apply_postfix_configuration
+    configure_opendkim_node
+    rebuild_postfix_maps
+    deploy_courier_certificate
+    enable_and_restart_services
+    check_mail_stack
+
+    cat <<EOF_SUMMARY
+
+Postfixer installation completed.
+
+Ubuntu:             ${UBUNTU_VERSION}
+Role:               ${POSTFIXER_ROLE}
+Hostname:           ${POSTFIXER_HOSTNAME}
+Node config:        ${POSTFIXER_CONFIG}
+Trusted networks:   ${POSTFIXER_NETWORKS_FILE}
+Relay domains:      ${POSTFIXER_RELAY_DOMAINS_FILE}
+Primary relay:      ${POSTFIXER_RELAYHOST:-direct delivery}
+Fallback relays:    ${POSTFIXER_FALLBACK_RELAYS:-none}
+Postfix config:     /etc/postfix
+Repository overlay: ${ETC_POSTFIX_SOURCE}
+Certificates:       externally managed under /etc/letsencrypt
+
+Server-specific identity and relay routing belong in ${POSTFIXER_CONFIG}, not in the repository main.cf.
+EOF_SUMMARY
+}
