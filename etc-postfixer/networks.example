@@ -1,0 +1,8 @@
+# Trusted Postfix networks.
+# Add only networks and hosts that are allowed to relay through this node.
+
+127.0.0.0/8
+[::1]/128
+10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
