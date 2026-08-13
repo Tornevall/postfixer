@@ -1,0 +1,5 @@
+# Valid relay recipients.
+# Public MX relay nodes should keep this synchronized with the final delivery server.
+# The right-hand value is ignored; it only needs to be non-empty.
+
+postmaster@example.com OK
