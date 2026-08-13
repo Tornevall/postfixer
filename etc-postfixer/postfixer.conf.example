@@ -12,6 +12,10 @@ POSTFIXER_HOSTNAME=mail.example.com
 POSTFIXER_MAIL_DOMAIN=example.com
 
 # Use Postfix destination syntax. Leave empty for direct Internet delivery.
+# Relay-to-relay traffic normally uses SMTP/25 between trusted nodes, for example:
+# POSTFIXER_RELAYHOST='[relay-2.example.com]'
+# POSTFIXER_FALLBACK_RELAYS='[relay-3.example.com] [relay-4.example.com]'
+# Port 587 is reserved for authenticated end-user submission on an inout node.
 POSTFIXER_RELAYHOST=
 POSTFIXER_FALLBACK_RELAYS=
 
