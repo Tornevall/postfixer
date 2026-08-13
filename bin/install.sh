@@ -15,4 +15,8 @@ source "${BIN_DIR}/common.sh"
 # shellcheck source=customizer.sh
 source "${BIN_DIR}/customizer.sh"
 
+# Managed port 587 submission, STARTTLS and Cyrus SASL policy.
+# shellcheck source=submission.sh
+source "${BIN_DIR}/submission.sh"
+
 main "$@"
