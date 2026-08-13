@@ -105,6 +105,45 @@ configure_postfix_node() {
     configure_submission_service
 }
 
+check_submission_protocol() {
+    local plain tls failed=0
+
+    command -v timeout >/dev/null 2>&1 || return 0
+    command -v openssl >/dev/null 2>&1 || return 0
+
+    # Verify the plaintext side of port 587: STARTTLS must be available while
+    # AUTH must still be hidden.
+    plain="$(timeout 6 bash -c '
+        exec 3<>/dev/tcp/127.0.0.1/587 || exit 1
+        IFS= read -r _ <&3 || exit 1
+        printf "EHLO postfixer-check.local\r\nQUIT\r\n" >&3
+        cat <&3
+    ' 2>/dev/null || true)"
+
+    if ! grep -Eq '^250[- ]STARTTLS' <<<"$plain"; then
+        warn "Port 587 does not advertise STARTTLS before authentication."
+        failed=1
+    fi
+
+    if grep -Eq '^250[- ]AUTH([ =]|$)' <<<"$plain"; then
+        warn "Port 587 advertises AUTH before STARTTLS."
+        failed=1
+    fi
+
+    # Verify the encrypted side without sending credentials. Once STARTTLS is
+    # established, the server must advertise the only mechanisms supported by
+    # saslauthd: PLAIN and LOGIN.
+    tls="$(printf 'EHLO postfixer-check.local\r\nQUIT\r\n' | \
+        timeout 8 openssl s_client -quiet -crlf -starttls smtp -connect 127.0.0.1:587 2>/dev/null || true)"
+
+    if ! grep -Eq '^250[- ]AUTH .*(PLAIN.*LOGIN|LOGIN.*PLAIN)' <<<"$tls"; then
+        warn "Port 587 does not advertise both AUTH PLAIN and LOGIN after STARTTLS."
+        failed=1
+    fi
+
+    [[ "$failed" -eq 0 ]] || return 1
+}
+
 check_submission_configuration() {
     local failed=0 value
 
@@ -147,6 +186,8 @@ check_submission_configuration() {
     if command -v ss >/dev/null 2>&1 && systemctl is-active --quiet postfix.service 2>/dev/null; then
         if ! ss -ltn 2>/dev/null | awk '$4 ~ /:587$/ {found=1} END {exit !found}'; then
             warn "Postfix is active but nothing is listening on TCP port 587."
+            failed=1
+        elif ! check_submission_protocol; then
             failed=1
         fi
     fi
