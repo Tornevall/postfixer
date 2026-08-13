@@ -1,0 +1,4 @@
+# Optional Postfix transport map.
+# Examples:
+# example.com relay:[mail-primary.example.com]
+# slow.example smtp:[relay-2.example.com]:587
