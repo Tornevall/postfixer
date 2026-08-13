@@ -35,11 +35,11 @@ reload:
 
 help:
 	@printf '%s\n' \
-		'make install  - install and configure the complete mail stack' \
-		'make apply    - copy etc-postfix/ into /etc/postfix, rebuild maps and reload' \
+		'make install  - install and customize the selected mail-server role' \
+		'make apply    - reapply shared and node-specific configuration' \
 		'make maps     - rebuild configured Postfix hash maps' \
 		'make aliases  - rebuild aliases and reload Postfix' \
-		'make cert     - deploy externally managed Lets Encrypt certificates to Courier' \
-		'make check    - validate Postfix, services, SASL socket and listening ports' \
+		'make cert     - deploy externally managed Lets Encrypt certificates' \
+		'make check    - validate Postfix, services, SASL, TLS and submission' \
 		'make restart  - restart installed mail services and run checks' \
 		'make reload   - validate and reload Postfix'
