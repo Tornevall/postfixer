@@ -13,6 +13,6 @@ install_release_packages() {
     if apt_has_candidate courier-imap && apt_has_candidate courier-pop; then
         install_courier_from_archive
     else
-        build_courier_for_noble
+        install_courier_from_jammy_packages || build_courier_for_noble
     fi
 }

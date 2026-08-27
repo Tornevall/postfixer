@@ -20,6 +20,12 @@ RUNTIME_DIR="${POSTFIXER_RUNTIME_DIR:-/usr/local/lib/postfixer}"
 COURIER_SOURCE_VERSION="${COURIER_SOURCE_VERSION:-1.4.1-3}"
 COURIER_SOURCE_BASE="${COURIER_SOURCE_BASE:-https://archive.ubuntu.com/ubuntu/pool/universe/c/courier}"
 COURIER_BUILD_ROOT="${COURIER_BUILD_ROOT:-/usr/local/src/postfixer-courier}"
+COURIER_JAMMY_VERSION="${COURIER_JAMMY_VERSION:-1.0.16-3build3}"
+COURIER_JAMMY_IMAP_VERSION="${COURIER_JAMMY_IMAP_VERSION:-5.0.13+1.0.16-3build3}"
+COURIER_JAMMY_BASE="${COURIER_JAMMY_BASE:-http://se.archive.ubuntu.com/ubuntu/pool/universe/c/courier}"
+GAMIN_JAMMY_VERSION="${GAMIN_JAMMY_VERSION:-0.1.10-6}"
+GAMIN_JAMMY_BASE="${GAMIN_JAMMY_BASE:-http://se.archive.ubuntu.com/ubuntu/pool/universe/g/gamin}"
+COURIER_JAMMY_ROOT="${COURIER_JAMMY_ROOT:-/usr/local/src/postfixer-courier-jammy}"
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     printf 'ERROR: Run %s/install.sh instead.\n' "$BIN_DIR" >&2
@@ -164,7 +170,7 @@ install_base_stack() {
         opendkim opendkim-tools opendmarc \
         courier-authdaemon courier-authlib courier-authlib-pipe courier-authlib-userdb
 
-    install_optional_packages curl wget swaks mailgraph rrdtool
+    install_optional_packages curl wget swaks mailgraph rrdtool certbot python3-certbot
 }
 
 install_courier_from_archive() {
@@ -174,7 +180,51 @@ install_courier_from_archive() {
 
 install_courier_build_dependencies() {
     install_required_packages \
-        build-essential dpkg-dev fakeroot wget devscripts equivs
+        build-essential dpkg-dev fakeroot wget devscripts equivs \
+        dh-exec dh-apache2 courier-authlib-dev default-libmysqlclient-dev \
+        expect ghostscript gnupg2 gnutls-bin groff-base \
+        libcourier-unicode-dev libgcrypt20-dev libgdbm-dev libgnutls28-dev \
+        libidn-dev libldap2-dev libpam0g-dev libpcre2-dev libperl-dev \
+        libpq-dev libsasl2-dev libtool-bin media-types mgetty-fax netpbm
+}
+
+install_courier_from_jammy_packages() {
+    local work_dir="${COURIER_JAMMY_ROOT}/${COURIER_JAMMY_VERSION}-${ARCH}"
+    local files=(
+        "gamin_${GAMIN_JAMMY_VERSION}_${ARCH}.deb"
+        "libgamin0_${GAMIN_JAMMY_VERSION}_${ARCH}.deb"
+        "courier-base_${COURIER_JAMMY_VERSION}_${ARCH}.deb"
+        "courier-imap_${COURIER_JAMMY_IMAP_VERSION}_${ARCH}.deb"
+        "courier-pop_${COURIER_JAMMY_VERSION}_${ARCH}.deb"
+    )
+    local file url
+
+    log "Installing Courier IMAP and POP3 from Ubuntu 22.04 local packages"
+    warn "Ubuntu 24.04 does not publish courier-imap/courier-pop. Postfixer will install the required Jammy Courier .deb files locally instead of compiling Courier."
+
+    case "$ARCH" in
+        amd64|arm64|armhf|ppc64el|riscv64|s390x) ;;
+        *) die "Jammy Courier fallback does not know how to fetch architecture: ${ARCH}" ;;
+    esac
+
+    install_required_packages gnutls-bin libcourier-unicode4 libidn12 libpcre3
+
+    mkdir -p "$work_dir"
+    cd "$work_dir"
+
+    for file in "${files[@]}"; do
+        case "$file" in
+            gamin_*|libgamin0_*) url="${GAMIN_JAMMY_BASE}/${file}" ;;
+            *) url="${COURIER_JAMMY_BASE}/${file}" ;;
+        esac
+
+        if [[ ! -s "$file" ]]; then
+            log "Downloading ${file}"
+            wget --timeout=20 --tries=3 -q --show-progress "$url"
+        fi
+    done
+
+    apt-get install -y "./${files[0]}" "./${files[1]}" "./${files[2]}" "./${files[3]}" "./${files[4]}"
 }
 
 build_courier_for_noble() {
@@ -182,6 +232,7 @@ build_courier_for_noble() {
     local build_dir="${COURIER_BUILD_ROOT}/${COURIER_SOURCE_VERSION}"
     local dsc="courier_${COURIER_SOURCE_VERSION}.dsc"
     local orig="courier_${upstream}.orig.tar.bz2"
+    local orig_sig="${orig}.asc"
     local debian="courier_${COURIER_SOURCE_VERSION}.debian.tar.xz"
     local source_dir base_deb imap_deb pop_deb
 
@@ -196,6 +247,7 @@ build_courier_for_noble() {
 
     wget -q --show-progress "${COURIER_SOURCE_BASE}/${dsc}"
     wget -q --show-progress "${COURIER_SOURCE_BASE}/${orig}"
+    wget -q --show-progress "${COURIER_SOURCE_BASE}/${orig_sig}"
     wget -q --show-progress "${COURIER_SOURCE_BASE}/${debian}"
 
     dpkg-source -x "$dsc"

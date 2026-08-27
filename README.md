@@ -25,6 +25,7 @@ The previous mail stack contains, depending on server role:
 - Transport maps.
 - Primary and fallback outbound relays.
 - Externally managed Let's Encrypt certificates.
+- Certbot when available from the Ubuntu package repositories.
 
 Postfixer is meant to install and normalize that stack instead of assuming that the target machine already has a working Postfix configuration.
 
@@ -53,13 +54,17 @@ A relay helper, gateway or backup MX.
 It provides:
 
 - SMTP and SMTP queueing.
+- Authenticated message submission on port 587.
+- Mandatory STARTTLS on port 587.
+- Cyrus SASL through `saslauthd` and PAM.
+- Local Unix account authentication for SMTP AUTH.
 - Trusted-network relay control.
 - Relay domains and transport maps.
 - Valid-recipient maps for public relay domains.
 - SpamAssassin, ClamAV, SPF, Postgrey, OpenDKIM and OpenDMARC.
 - Primary and fallback outbound routing.
 
-It does not become a final mailbox server. Local Maildir delivery, Courier and end-user SMTP AUTH are disabled.
+It does not become a final mailbox server. Local Maildir delivery and Courier IMAP/POP are disabled.
 
 A relay may queue mail while the final server is unavailable. That is normal Postfix queueing and is different from delivering the message into a local Maildir.
 
@@ -160,12 +165,17 @@ The related data files are:
 ```
 
 If `/etc/postfixer/postfixer.conf` is missing, the first interactive installation creates it.
+Non-interactive installation refuses to continue until the file exists.
+
+Trusted Postfix relay networks are managed through `POSTFIXER_NETWORKS_FILE`, which defaults to `/etc/postfixer/networks`. When that file is missing but a legacy `/etc/postfix_networks` file or symlink exists, Postfixer copies it into `/etc/postfixer/networks` during configuration. New Postfix configuration should point `mynetworks` at `/etc/postfixer/networks`, not at older environment-specific paths below `/var/tornevall`.
 
 ## Hostname and SMTP identity
 
 Server identity must not be hard-coded in the shared `main.cf`.
 
 `POSTFIXER_HOSTNAME` is applied as the system hostname. Postfixer removes an explicit `myhostname` assignment from `/etc/postfix/main.cf`, allowing Postfix to derive `$myhostname` from the system FQDN.
+
+`POSTFIXER_HOSTNAME`, `POSTFIXER_MAIL_DOMAIN` and `POSTFIXER_CERT_DOMAIN` must all be fully qualified domain names. If the installer cannot safely detect a host FQDN during the first interactive run, it asks the installer to enter one instead of writing a guessed short hostname or `localdomain` value. Existing config files are validated the same way before changes are applied.
 
 A shared banner can therefore remain:
 
@@ -201,7 +211,7 @@ Backups are written below:
 
 This area is deliberately managed instead of inherited from an old installation.
 
-The authentication path on an `inout` node is:
+The authentication path on both `inout` and `relay` nodes is:
 
 ```text
 Postfix submission :587
@@ -246,7 +256,7 @@ Postfixer keeps TLS opportunistic there and disables SMTP AUTH globally. Relay p
 
 ### Port 587
 
-The `inout` role creates and manages the `submission` service in `master.cf`.
+Both roles create and manage the `submission` service in `master.cf`.
 
 It requires:
 
@@ -273,7 +283,7 @@ submission inet n - y - - smtpd
   -o milter_macro_daemon_name=ORIGINATING
 ```
 
-A valid externally synchronized TLS certificate is mandatory before the `inout` submission service is enabled. The installer fails closed instead of exposing a half-working authentication service.
+A valid externally synchronized TLS certificate is mandatory before the submission service is enabled. The installer fails closed instead of exposing a half-working authentication service.
 
 ## TLS policy
 
@@ -286,9 +296,11 @@ They are expected under:
 /etc/letsencrypt/live/DOMAIN/privkey.pem
 ```
 
-Another server may run Certbot and synchronize `/etc/letsencrypt` to this node.
+Another server may run Certbot and synchronize `/etc/letsencrypt` to this node. `/etc/letsencrypt` may also be a symlink to a shared tree, for example `/var/tornevall/system/etc/letsencrypt`, as long as `/etc/letsencrypt/live/DOMAIN/fullchain.pem` and `/etc/letsencrypt/live/DOMAIN/privkey.pem` are readable on the mail node.
 
 `POSTFIXER_CERT_DOMAIN` selects the node certificate.
+
+Postfixer installs Certbot when it is available from the Ubuntu package repositories, but it does not automatically request or replace certificates during mail-stack installation.
 
 Postfixer disables SSLv2, SSLv3, TLS 1.0 and TLS 1.1 in its managed SMTP TLS policy. Submission requires encrypted SMTP before authentication.
 
@@ -421,11 +433,12 @@ sudo make install
 The first interactive installation asks for:
 
 - `inout` or `relay` role.
-- SMTP/server hostname.
-- Default mail domain.
+- SMTP/server hostname as an FQDN.
+- Default mail domain as an FQDN.
 - Optional primary outbound relay.
 - Optional fallback outbound relays.
-- Certificate domain.
+- Certificate domain as an FQDN.
+- Trusted relay networks/IPs to seed `/etc/postfixer/networks`.
 
 ## Make targets
 
@@ -439,12 +452,13 @@ The first interactive installation asks for:
 | `make check` | Validate the active role, services, TLS and submission configuration. |
 | `make restart` | Restart role-specific services and run checks. |
 | `make reload` | Validate and reload Postfix. |
+| `make reset` | Back up and purge the managed mail stack after explicit confirmation. |
 
 The map builder reads the active Postfix configuration. `hash:` maps use `postmap`, aliases use `postalias`, and `regexp:` maps are not blindly hashed.
 
 ## What `make check` verifies
 
-For an `inout` node, the checks include:
+For both `inout` and `relay` nodes, the checks include:
 
 - `postfix check`.
 - Required services are active.
@@ -469,6 +483,24 @@ testsaslauthd \
   -p PASSWORD
 ```
 
+## Full reset
+
+For repeated test installs, Postfixer includes a destructive reset helper:
+
+```bash
+POSTFIXER_RESET_CONFIRM=purge-mail-stack sudo make reset
+```
+
+The reset creates a backup below:
+
+```text
+/root/postfixer-reset-backup-*
+```
+
+It backs up and removes managed mail configuration and runtime state such as `/etc/postfix`, `/etc/postfixer`, `/etc/courier`, SASL/PAM mail files, Postfix runtime directories and Postfixer Courier staging trees. It purges the installed mail packages used by Postfixer.
+
+It does not remove `/home`, externally managed `/etc/letsencrypt`, or the Git checkout such as `/root/postfixer`.
+
 ## Migration notes
 
 The old mail-server tree contains more than `main.cf` and `master.cf`.
@@ -485,6 +517,14 @@ Migration should be done by function:
 - DKIM tables and keys -> `/etc/opendkim`, with private keys kept outside Git.
 
 Remaining migration work includes the exact SpamAssassin/content-filter path, virtual alias rules, sender-dependent relay maps and any other site-specific maps from the previous server.
+
+An example migration runner is available at:
+
+```bash
+examples/migrations/import-mail01-postfix.sh
+```
+
+It defaults to `root@mail01.tornevall.net:/etc/postfix`, fetches into `/root/postfixer-migration/mail01-postfix`, and can also export only those remote passwd/shadow entries whose users have active `/home/*/Maildir/{cur,new}` messages. The account exports are written outside Git with mode `0600`.
 
 ## Related older documentation
 

@@ -2,7 +2,7 @@
 # Installed as /etc/postfixer/postfixer.conf by the interactive customizer.
 
 # inout = inbound/outbound final delivery server with Maildir, Courier and SMTP AUTH
-# relay = relay helper only, with no local Maildir/IMAP/POP delivery
+# relay = relay helper with SMTP AUTH, but no local Maildir/IMAP/POP delivery
 POSTFIXER_ROLE=inout
 
 # SMTP identity. Postfixer applies this as the system hostname so Postfix can use
@@ -15,7 +15,7 @@ POSTFIXER_MAIL_DOMAIN=example.com
 # Relay-to-relay traffic normally uses SMTP/25 between trusted nodes, for example:
 # POSTFIXER_RELAYHOST='[relay-2.example.com]'
 # POSTFIXER_FALLBACK_RELAYS='[relay-3.example.com] [relay-4.example.com]'
-# Port 587 is reserved for authenticated end-user submission on an inout node.
+# Port 587 is reserved for authenticated end-user submission on both roles.
 POSTFIXER_RELAYHOST=
 POSTFIXER_FALLBACK_RELAYS=
 

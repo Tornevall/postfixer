@@ -40,8 +40,8 @@ configure_cyrus_sasl_server() {
     postconf_set smtpd_sasl_security_options noanonymous
     postconf_set smtpd_sasl_tls_security_options noanonymous
 
-    # Never expose AUTH on ordinary plaintext SMTP. The inout submission
-    # service below enables it explicitly after mandatory TLS is active.
+    # Never expose AUTH on ordinary plaintext SMTP. The submission service
+    # below enables it explicitly after mandatory TLS is active.
     postconf_set smtpd_sasl_auth_enable no
     postconf_set smtpd_tls_auth_only yes
 }
@@ -65,14 +65,8 @@ submission_certificate_ready() {
 }
 
 configure_submission_service() {
-    if [[ "$POSTFIXER_ROLE" != inout ]]; then
-        # Relay helpers do not provide end-user submission authentication.
-        postconf -MX submission/inet >/dev/null 2>&1 || true
-        return 0
-    fi
-
     submission_certificate_ready || die \
-        "The inout profile requires a TLS certificate for SMTP submission. Missing /etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/{fullchain.pem,privkey.pem}."
+        "The ${POSTFIXER_ROLE} profile requires a TLS certificate for SMTP submission. Missing /etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/{fullchain.pem,privkey.pem}."
 
     # Create or replace the managed RFC 6409 submission service. The service
     # is deliberately isolated from port 25 and requires authentication.
@@ -93,15 +87,7 @@ configure_submission_service() {
 configure_postfix_node() {
     postfixer_node_configure_postfix_node "$@"
     configure_tls_policy
-
-    if [[ "$POSTFIXER_ROLE" == inout ]]; then
-        configure_cyrus_sasl_server
-    else
-        # Ensure relay-only nodes cannot accidentally inherit SMTP AUTH from an
-        # older installation or repository main.cf.
-        postconf_set smtpd_sasl_auth_enable no
-    fi
-
+    configure_cyrus_sasl_server
     configure_submission_service
 }
 
@@ -146,8 +132,6 @@ check_submission_protocol() {
 
 check_submission_configuration() {
     local failed=0 value
-
-    [[ "$POSTFIXER_ROLE" == inout ]] || return 0
 
     submission_certificate_ready || {
         warn "SMTP submission certificate is missing for ${POSTFIXER_CERT_DOMAIN}."

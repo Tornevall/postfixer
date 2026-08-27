@@ -35,6 +35,38 @@ prompt_value() {
     printf '%s\n' "${value:-$default_value}"
 }
 
+prompt_required_value() {
+    local prompt="$1"
+    local value=""
+
+    while [[ -z "$value" ]]; do
+        read -r -p "${prompt}: " value
+    done
+
+    printf '%s\n' "$value"
+}
+
+prompt_fqdn() {
+    local prompt="$1"
+    local default_value="$2"
+    local value=""
+
+    while true; do
+        if [[ -n "$default_value" ]]; then
+            value="$(prompt_value "$prompt" "$default_value")"
+        else
+            value="$(prompt_required_value "$prompt")"
+        fi
+
+        if is_fqdn "$value"; then
+            printf '%s\n' "$value"
+            return 0
+        fi
+
+        warn "${prompt} must be a fully qualified domain name, for example mail.example.com."
+    done
+}
+
 prompt_optional() {
     local prompt="$1"
     local value=""
@@ -46,16 +78,27 @@ prompt_optional() {
     printf '%s\n' "$value"
 }
 
+is_fqdn() {
+    local value="$1"
+
+    [[ ${#value} -le 253 ]] || return 1
+    [[ "$value" == *.* ]] || return 1
+    [[ "$value" != .* && "$value" != *. ]] || return 1
+    [[ "$value" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]
+}
+
 create_postfixer_config() {
-    local detected_hostname detected_domain role hostname_value mail_domain relayhost fallbacks cert_domain
+    local detected_hostname detected_domain role hostname_value mail_domain relayhost fallbacks cert_domain trusted_networks
 
     install -d -m 0755 "$POSTFIXER_ETC"
 
     detected_hostname="$(hostname -f 2>/dev/null || hostname)"
-    if [[ "$detected_hostname" == *.* ]]; then
+    if is_fqdn "$detected_hostname"; then
         detected_domain="${detected_hostname#*.}"
     else
-        detected_domain="localdomain"
+        warn "Could not detect a reliable FQDN from this host. The installer will ask for one explicitly."
+        detected_hostname=""
+        detected_domain=""
     fi
 
     if [[ ! -t 0 ]]; then
@@ -68,16 +111,17 @@ Postfixer node customizer
 
 Choose one role:
   inout  - complete inbound/outbound server with local Maildir, SMTP AUTH and Courier
-  relay  - relay helper only; no local Maildir delivery and no IMAP/POP service
+  relay  - relay helper with SMTP AUTH; no local Maildir delivery and no IMAP/POP service
 
 EOF_INTRO
 
     role="$(prompt_value 'Node role (inout/relay)' 'inout')"
-    hostname_value="$(prompt_value 'SMTP/server hostname' "$detected_hostname")"
-    mail_domain="$(prompt_value 'Default mail domain' "$detected_domain")"
+    hostname_value="$(prompt_fqdn 'SMTP/server hostname (FQDN)' "$detected_hostname")"
+    mail_domain="$(prompt_fqdn 'Default mail domain' "$detected_domain")"
     relayhost="$(prompt_optional 'Primary outbound relay in Postfix syntax, for example [relay-2.example.com] (blank = direct delivery)')"
     fallbacks="$(prompt_optional 'Fallback outbound relays separated by spaces, for example [relay-3.example.com] [relay-4.example.com]')"
-    cert_domain="$(prompt_value 'Certificate domain under /etc/letsencrypt/live' "$hostname_value")"
+    cert_domain="$(prompt_fqdn 'Certificate domain under /etc/letsencrypt/live' "$hostname_value")"
+    trusted_networks="$(prompt_optional 'Trusted relay networks/IPs separated by spaces, for example 10.0.0.0/8 192.0.2.10 [2001:db8::]/32 (blank = edit later)')"
 
     {
         printf '# Postfixer node configuration. This file is the source of truth for server-specific settings.\n'
@@ -96,6 +140,17 @@ EOF_INTRO
     } > "$POSTFIXER_CONFIG"
 
     chmod 0644 "$POSTFIXER_CONFIG"
+
+    if [[ -n "$trusted_networks" ]]; then
+        {
+            printf '# Trusted Postfix networks.\n'
+            printf '# Add only networks and hosts that are allowed to relay through this node.\n'
+            # shellcheck disable=SC2086
+            printf '%s\n' $trusted_networks
+        } > "${POSTFIXER_ETC}/networks"
+        chmod 0644 "${POSTFIXER_ETC}/networks"
+    fi
+
     log "Created ${POSTFIXER_CONFIG}"
 }
 
@@ -114,6 +169,20 @@ install_postfixer_data_file() {
     fi
 }
 
+install_networks_file() {
+    local legacy=/etc/postfix_networks
+
+    [[ -e "$POSTFIXER_NETWORKS_FILE" || -L "$POSTFIXER_NETWORKS_FILE" ]] && return 0
+    install -d -m 0755 "$(dirname "$POSTFIXER_NETWORKS_FILE")"
+
+    if [[ -e "$legacy" || -L "$legacy" ]]; then
+        cp -a "$legacy" "$POSTFIXER_NETWORKS_FILE"
+        return 0
+    fi
+
+    install_postfixer_data_file "$POSTFIXER_NETWORKS_FILE" networks.example
+}
+
 load_postfixer_config() {
     [[ -f "$POSTFIXER_CONFIG" ]] || create_postfixer_config
 
@@ -121,8 +190,8 @@ load_postfixer_config() {
     source "$POSTFIXER_CONFIG"
 
     POSTFIXER_ROLE="${POSTFIXER_ROLE:-inout}"
-    POSTFIXER_HOSTNAME="${POSTFIXER_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}"
-    POSTFIXER_MAIL_DOMAIN="${POSTFIXER_MAIL_DOMAIN:-${POSTFIXER_HOSTNAME#*.}}"
+    POSTFIXER_HOSTNAME="${POSTFIXER_HOSTNAME:-}"
+    POSTFIXER_MAIL_DOMAIN="${POSTFIXER_MAIL_DOMAIN:-}"
     POSTFIXER_RELAYHOST="${POSTFIXER_RELAYHOST:-}"
     POSTFIXER_FALLBACK_RELAYS="${POSTFIXER_FALLBACK_RELAYS:-}"
     POSTFIXER_CERT_DOMAIN="${POSTFIXER_CERT_DOMAIN:-$POSTFIXER_HOSTNAME}"
@@ -138,7 +207,14 @@ load_postfixer_config() {
         *) die "Invalid POSTFIXER_ROLE=${POSTFIXER_ROLE}. Supported roles: inout, relay." ;;
     esac
 
-    install_postfixer_data_file "$POSTFIXER_NETWORKS_FILE" networks.example
+    is_fqdn "$POSTFIXER_HOSTNAME" || \
+        die "POSTFIXER_HOSTNAME must be a fully qualified domain name. Run the installer interactively or edit ${POSTFIXER_CONFIG}."
+    is_fqdn "$POSTFIXER_MAIL_DOMAIN" || \
+        die "POSTFIXER_MAIL_DOMAIN must be a fully qualified domain name. Run the installer interactively or edit ${POSTFIXER_CONFIG}."
+    is_fqdn "$POSTFIXER_CERT_DOMAIN" || \
+        die "POSTFIXER_CERT_DOMAIN must be a fully qualified domain name. Run the installer interactively or edit ${POSTFIXER_CONFIG}."
+
+    install_networks_file
     install_postfixer_data_file "$POSTFIXER_LOCAL_DOMAINS_FILE" local-domains.example
     install_postfixer_data_file "$POSTFIXER_RELAY_DOMAINS_FILE" relay-domains.example
     install_postfixer_data_file "$POSTFIXER_RELAY_RECIPIENTS_FILE" relay-recipients.example
@@ -357,12 +433,12 @@ deploy_courier_certificate() {
 
 enable_and_restart_services() {
     local service
-    local services=(postgrey opendkim opendmarc clamav-daemon spamassassin spamd postfix)
+    local services=(saslauthd postgrey opendkim opendmarc clamav-daemon spamassassin spamd postfix)
 
     load_postfixer_config
 
     if [[ "$POSTFIXER_ROLE" == inout ]]; then
-        services+=(saslauthd courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl)
+        services+=(courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl)
     fi
 
     log "Enabling and restarting services for ${POSTFIXER_ROLE} profile"
@@ -374,7 +450,7 @@ enable_and_restart_services() {
     done
 
     if [[ "$POSTFIXER_ROLE" == relay ]]; then
-        for service in courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl saslauthd; do
+        for service in courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl; do
             service_exists "$service" && systemctl disable --now "$service.service" >/dev/null 2>&1 || true
         done
     fi
@@ -390,12 +466,14 @@ check_mail_stack() {
     postfix check
     postconf -n >/dev/null
 
+    services+=(saslauthd)
+    if [[ ! -S /var/spool/postfix/var/run/saslauthd/mux ]]; then
+        warn "saslauthd mux socket is missing from the Postfix chroot."
+        failed=1
+    fi
+
     if [[ "$POSTFIXER_ROLE" == inout ]]; then
-        services+=(saslauthd courier-authdaemon courier-imap)
-        if [[ ! -S /var/spool/postfix/var/run/saslauthd/mux ]]; then
-            warn "saslauthd mux socket is missing from the Postfix chroot."
-            failed=1
-        fi
+        services+=(courier-authdaemon courier-imap)
     fi
 
     for service in "${services[@]}"; do
@@ -434,9 +512,10 @@ full_install() {
     backup_existing_configuration
     run_release_install
 
+    configure_saslauthd
+
     if [[ "$POSTFIXER_ROLE" == inout ]]; then
         configure_courier
-        configure_saslauthd
     fi
 
     apply_postfix_configuration

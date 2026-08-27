@@ -5,7 +5,7 @@ SHELL := /bin/bash
 INSTALLER := $(CURDIR)/bin/install.sh
 CERT_DOMAIN ?=
 
-.PHONY: install apply maps aliases cert check restart reload help
+.PHONY: install apply maps aliases cert check restart reload reset test help
 
 install:
 	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
@@ -33,6 +33,12 @@ reload:
 	@postfix check
 	@systemctl reload postfix.service
 
+reset:
+	@POSTFIXER_RESET_CONFIRM="$${POSTFIXER_RESET_CONFIRM:-}" bash $(CURDIR)/bin/reset.sh
+
+test:
+	@bash tests/profile-install-test.sh
+
 help:
 	@printf '%s\n' \
 		'make install  - install and customize the selected mail-server role' \
@@ -42,4 +48,6 @@ help:
 		'make cert     - deploy externally managed Lets Encrypt certificates' \
 		'make check    - validate Postfix, services, SASL, TLS and submission' \
 		'make restart  - restart installed mail services and run checks' \
-		'make reload   - validate and reload Postfix'
+		'make reload   - validate and reload Postfix' \
+		'make reset    - purge mail stack after explicit confirmation' \
+		'make test     - run local installer profile tests'
