@@ -161,7 +161,7 @@ install_base_stack() {
     preseed_postfix
 
     install_required_packages \
-        ca-certificates openssl rsync make iproute2 \
+        ca-certificates openssl openssh-client rsync make iproute2 \
         postfix postfix-pcre postfix-policyd-spf-python postgrey \
         sasl2-bin libsasl2-2 libsasl2-modules \
         spamassassin spamc \

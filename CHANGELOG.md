@@ -2,6 +2,20 @@
 
 All notable changes to Postfixer are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Required passwordless SSH key or agent authentication for remote Postfix and
+  Maildir imports. Import commands now use OpenSSH `BatchMode=yes` and fail
+  instead of waiting for password input.
+- Added `openssh-client` as an explicit installer dependency for SSH-backed
+  configuration and Maildir migration.
+- Documented SSH key setup, host-key initialization, root/sudo agent handling
+  and the remote permissions required by account and Maildir migration.
+- Changed mailbox discovery to include every `/home/*/Maildir`, including empty
+  Maildirs, with an optional `REMOTE_HOME_ROOT` override for other layouts.
+
 ## 2026-11-01 - Initial working release candidate
 
 This release collects all changes since the initial repository commit and

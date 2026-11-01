@@ -453,6 +453,15 @@ sudo make install-server
 
 Install a relay without Courier IMAP/POP with `sudo make install-relay`. Run plain `make` to show all available targets.
 
+After installation, verify the selected role and the complete live mail stack:
+
+```bash
+sudo make status
+sudo make check
+```
+
+The check must pass before the server is placed in DNS or receives production traffic. For a hybrid server, create or migrate the local Unix accounts that own `/home/USER/Maildir`; the same accounts authenticate through Courier and SMTP submission. Review `/etc/postfix/postfixer.d/networks` before allowing applications or other servers to relay.
+
 The first interactive installation asks for:
 
 - Server identity and role (`install-server` defaults to `inout`; `install-relay` defaults to `relay`).
@@ -556,6 +565,19 @@ examples/migrations/import-postfix-server.sh
 
 Set the remote source explicitly. Data is staged below `/root/postfixer-migration/postfix-import` by default. A safe migration sequence is:
 
+Remote imports require a passwordless SSH session through a public key or an unlocked SSH agent. The importer enables OpenSSH `BatchMode=yes`, so it fails instead of waiting for a password prompt. Configure the key and accept the remote host key before starting, for example:
+
+```bash
+# Run ssh-keygen once if root does not already have an SSH identity.
+sudo ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519
+sudo ssh-copy-id -i /root/.ssh/id_ed25519.pub root@old-mail.example.com
+sudo ssh -o BatchMode=yes root@old-mail.example.com true
+```
+
+Run the verification as the same local account that runs the migration. When the migration runs through `sudo`, place the identity in root's SSH configuration or preserve a suitable agent with `sudo --preserve-env=SSH_AUTH_SOCK`. The remote account must be able to read `/etc/postfix`, all mailbox directories and, for account export, the shadow database.
+
+Mailbox discovery includes every `/home/*/Maildir` directory, including empty Maildirs. If a server stores home directories elsewhere, set `REMOTE_HOME_ROOT`, for example `sudo make import-users REMOTE=root@old-mail.example.com REMOTE_HOME_ROOT=/srv/home`, and use the same value for `make import-mail`.
+
 ```bash
 sudo make import-fetch REMOTE=root@old-mail.example.com
 sudo make import-users REMOTE=root@old-mail.example.com
@@ -563,7 +585,7 @@ sudo make import-mail REMOTE=root@old-mail.example.com
 sudo make import-config
 ```
 
-The Maildir step uses resumable `rsync -aHAX --numeric-ids --partial` transfers per exported user. Configuration and mail are staged outside Git. Modular map files are installed below `/etc/postfix/postfixer.d/imports`; credentials, `main.cf`, `master.cf`, private keys and generated databases are not activated automatically.
+The Maildir step uses resumable `rsync -aHAX --numeric-ids --partial` transfers over the same passwordless SSH session for each exported user. Configuration and mail are staged outside Git. Modular map files are installed below `/etc/postfix/postfixer.d/imports`; credentials, `main.cf`, `master.cf`, private keys and generated databases are not activated automatically.
 
 ## Related older documentation
 

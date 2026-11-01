@@ -8,6 +8,7 @@ umask 077
 
 REMOTE="${REMOTE:-}"
 REMOTE_POSTFIX_DIR="${REMOTE_POSTFIX_DIR:-/etc/postfix}"
+REMOTE_HOME_ROOT="${REMOTE_HOME_ROOT:-/home}"
 STAGING_ROOT="${STAGING_ROOT:-/root/postfixer-migration}"
 MIGRATION_NAME="${MIGRATION_NAME:-postfix-import}"
 STAGING_DIR="${STAGING_DIR:-${STAGING_ROOT}/${MIGRATION_NAME}}"
@@ -16,6 +17,8 @@ REPORT_FILE="${REPORT_FILE:-${STAGING_DIR}/README.migration}"
 MAILDIR_STAGING_DIR="${MAILDIR_STAGING_DIR:-${STAGING_DIR}/maildirs}"
 POSTFIXER_IMPORT_ROOT="${POSTFIXER_IMPORT_ROOT:-/etc/postfix/postfixer.d/imports}"
 IMPORT_TARGET="${IMPORT_TARGET:-${POSTFIXER_IMPORT_ROOT}/${MIGRATION_NAME}}"
+SSH_BATCH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10)
+RSYNC_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=10'
 
 usage() {
     cat <<'EOF_USAGE'
@@ -29,15 +32,18 @@ Usage:
 Actions:
   --fetch           Rsync REMOTE:/etc/postfix into a staging directory outside Git.
   --fetch-maildir-users
-                    Find remote /home/*/Maildir mailboxes with messages and export
-                    only matching passwd/shadow entries into staging, mode 0600.
+                    Find every remote REMOTE_HOME_ROOT/*/Maildir and export only
+                    matching passwd/shadow entries into staging, mode 0600.
   --fetch-maildirs   Rsync Maildir data for the exported users into root-only staging.
   --diff-local      Diff fetched files against local /etc/postfix.
   --install-modular Install non-secret map files below /etc/postfix/postfixer.d/imports.
 
 Defaults:
   REMOTE must be supplied as user@host for remote actions.
+  Remote actions require passwordless SSH through a key or SSH agent.
+  OpenSSH configuration selects identities, jump hosts and other connection options.
   REMOTE_POSTFIX_DIR=/etc/postfix
+  REMOTE_HOME_ROOT=/home
   STAGING_DIR=/root/postfixer-migration/postfix-import
   IMPORT_TARGET=/etc/postfix/postfixer.d/imports/postfix-import
 
@@ -49,6 +55,9 @@ Examples:
   sudo ./examples/migrations/import-postfix-server.sh --install-modular
 
 Notes:
+  Remote commands use SSH BatchMode and never prompt for a password. Verify the
+  connection as the same local account that runs this script before importing.
+
   This script intentionally does not guess node identity. Values such as
   myhostname, relayhost, mynetworks and certificate paths should be migrated
   into /etc/postfix/postfixer.d instead of blindly kept in a shared main.cf.
@@ -76,6 +85,12 @@ require_fetched_tree() {
 
 require_remote() {
     [[ -n "$REMOTE" ]] || die "Set REMOTE=user@host for this action."
+    [[ "$REMOTE_HOME_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || die \
+        "REMOTE_HOME_ROOT must be an absolute path without spaces or shell characters."
+    [[ "$REMOTE_HOME_ROOT" != *'/../'* && "$REMOTE_HOME_ROOT" != */.. && "$REMOTE_HOME_ROOT" != *'/./'* ]] || die \
+        "REMOTE_HOME_ROOT must not contain dot path segments."
+    ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" true || die \
+        "Passwordless SSH failed for ${REMOTE}. Configure an SSH key or agent and verify it with: ssh -o BatchMode=yes ${REMOTE} true"
 }
 
 write_report() {
@@ -110,7 +125,7 @@ fetch_remote_postfix() {
     log "Fetching ${REMOTE}:${REMOTE_POSTFIX_DIR}"
     mkdir -p "$FETCHED_DIR"
     chmod 0700 "$STAGING_DIR" "${STAGING_DIR}/fetched" "$FETCHED_DIR"
-    rsync -a --delete \
+    rsync -a --delete -e "$RSYNC_SSH_COMMAND" \
         --exclude '*.db' \
         --exclude '*.lmdb' \
         --exclude '*.lock' \
@@ -131,20 +146,18 @@ fetch_maildir_users() {
     log "Discovering active Maildir users on ${REMOTE}"
     mkdir -p "$STAGING_DIR"
 
-    ssh "$REMOTE" 'set -e
-        find /home -mindepth 4 -maxdepth 4 \
-            \( -path "*/Maildir/new/*" -o -path "*/Maildir/cur/*" \) \
-            -type f -printf "%h\n" 2>/dev/null |
-        sed -E "s#/Maildir/(new|cur)$##" |
-        awk -F/ "$2 == \"home\" && NF == 3 {print \$3}" |
+    ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" "set -e
+        find ${REMOTE_HOME_ROOT} -mindepth 2 -maxdepth 2 \
+            -type d -name Maildir -printf '%h\\n' 2>/dev/null |
+        awk -F/ 'NF {print \$NF}' |
         sort -u
-    ' > "$users_file"
+    " > "$users_file"
 
     if [[ ! -s "$users_file" ]]; then
-        die "No active Maildir users were found on ${REMOTE}."
+        die "No Maildir users were found below ${REMOTE}:${REMOTE_HOME_ROOT}."
     fi
 
-    ssh "$REMOTE" 'set -e
+    ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" 'set -e
         tmp="$(mktemp)"
         cat > "$tmp"
         while IFS= read -r user; do
@@ -153,7 +166,7 @@ fetch_maildir_users() {
         rm -f "$tmp"
     ' < "$users_file" > "$passwd_file"
 
-    ssh "$REMOTE" 'set -e
+    ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" 'set -e
         tmp="$(mktemp)"
         cat > "$tmp"
         while IFS= read -r user; do
@@ -166,7 +179,7 @@ fetch_maildir_users() {
 
     {
         printf 'Maildir user export from %s\n\n' "$REMOTE"
-        printf 'Users with messages under /home/*/Maildir/{cur,new}: %s\n' "$(wc -l < "$users_file")"
+        printf 'Users with %s/*/Maildir: %s\n' "$REMOTE_HOME_ROOT" "$(wc -l < "$users_file")"
         printf 'passwd entries exported: %s\n' "$(wc -l < "$passwd_file")"
         printf 'shadow entries exported: %s\n' "$(wc -l < "$shadow_file")"
         printf '\nFiles:\n'
@@ -190,9 +203,10 @@ fetch_maildirs() {
         [[ "$user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Unsafe user name in ${users_file}: ${user}"
         target="${MAILDIR_STAGING_DIR}/${user}/Maildir"
         install -d -m 0700 "$target"
-        log "Fetching /home/${user}/Maildir from ${REMOTE}"
+        log "Fetching ${REMOTE_HOME_ROOT}/${user}/Maildir from ${REMOTE}"
         rsync -aHAX --numeric-ids --partial --info=progress2,stats2 \
-            "${REMOTE}:/home/${user}/Maildir/" \
+            -e "$RSYNC_SSH_COMMAND" \
+            "${REMOTE}:${REMOTE_HOME_ROOT}/${user}/Maildir/" \
             "${target}/"
     done < "$users_file"
 

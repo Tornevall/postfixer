@@ -7,6 +7,7 @@ INSTALLER := $(CURDIR)/bin/install.sh
 IMPORTER := $(CURDIR)/examples/migrations/import-postfix-server.sh
 CERT_DOMAIN ?=
 REMOTE ?=
+REMOTE_HOME_ROOT ?= /home
 MIGRATION_NAME ?= postfix-import
 
 .PHONY: install install-server install-relay apply maps aliases cert check status restart reload purge reset import-fetch import-users import-mail import-config test help
@@ -57,11 +58,11 @@ import-fetch:
 
 import-users:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-users REMOTE=root@mail.example.com\n' >&2; exit 64; }
-	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-maildir-users
+	@REMOTE="$(REMOTE)" REMOTE_HOME_ROOT="$(REMOTE_HOME_ROOT)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-maildir-users
 
 import-mail:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-mail REMOTE=root@mail.example.com\n' >&2; exit 64; }
-	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-maildirs
+	@REMOTE="$(REMOTE)" REMOTE_HOME_ROOT="$(REMOTE_HOME_ROOT)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-maildirs
 
 import-config:
 	@MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --install-modular

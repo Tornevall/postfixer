@@ -290,11 +290,87 @@ run_modular_import_test() {
         fail "import activation warning was not printed"
 }
 
+run_importer_ssh_policy_test() {
+    local importer="${ROOT_DIR}/examples/migrations/import-postfix-server.sh"
+
+    grep -Fq 'SSH_BATCH_OPTIONS=(-o BatchMode=yes' "$importer" || \
+        fail "importer does not require non-interactive SSH authentication"
+    grep -Fq "RSYNC_SSH_COMMAND='ssh -o BatchMode=yes" "$importer" || \
+        fail "rsync does not require non-interactive SSH authentication"
+    grep -Fq 'REMOTE_HOME_ROOT="${REMOTE_HOME_ROOT:-/home}"' "$importer" || \
+        fail "importer does not default mailbox discovery to /home"
+    grep -Fq -- '-type d -name Maildir' "$importer" || \
+        fail "importer does not discover all Maildir directories"
+}
+
+run_maildir_sync_test() {
+    local run_dir="${TMP_ROOT}/maildir-sync"
+    local mock_dir="${run_dir}/mock-bin"
+    local staging_dir="${run_dir}/staging"
+    local ssh_log="${run_dir}/ssh.log"
+    local rsync_log="${run_dir}/rsync.log"
+
+    mkdir -p "$mock_dir"
+
+    cat > "${mock_dir}/ssh" <<'EOF_SSH'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' "$*" >> "$SSH_LOG"
+
+case "$*" in
+    *'getent passwd'*)
+        while IFS= read -r user; do
+            printf '%s:x:1000:1000::/home/%s:/bin/bash\n' "$user" "$user"
+        done
+        ;;
+    *'getent shadow'*)
+        while IFS= read -r user; do
+            printf '%s:hash:1:0:99999:7:::\n' "$user"
+        done
+        ;;
+    *'find /home'*)
+        printf 'alice\nbob\n'
+        ;;
+esac
+EOF_SSH
+
+    cat > "${mock_dir}/rsync" <<'EOF_RSYNC'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' "$*" >> "$RSYNC_LOG"
+EOF_RSYNC
+    chmod 0755 "${mock_dir}/ssh" "${mock_dir}/rsync"
+
+    PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
+    REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
+        bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildir-users \
+        >/dev/null
+
+    PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
+    REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
+        bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildirs \
+        >/dev/null
+
+    grep -Fxq alice "${staging_dir}/maildir-users.txt" || fail "alice Maildir was not discovered"
+    grep -Fxq bob "${staging_dir}/maildir-users.txt" || fail "bob Maildir was not discovered"
+    [[ -d "${staging_dir}/maildirs/alice/Maildir" ]] || fail "alice Maildir staging was not created"
+    [[ -d "${staging_dir}/maildirs/bob/Maildir" ]] || fail "bob Maildir staging was not created"
+    grep -Fq -- '-o BatchMode=yes' "$ssh_log" || fail "SSH synchronization did not use BatchMode"
+    grep -Fq -- '-e ssh -o BatchMode=yes -o ConnectTimeout=10' "$rsync_log" || \
+        fail "rsync synchronization did not use passwordless SSH options"
+    grep -Fq 'root@mail-old.example.com:/home/alice/Maildir/' "$rsync_log" || \
+        fail "rsync did not fetch alice from /home"
+    grep -Fq 'root@mail-old.example.com:/home/bob/Maildir/' "$rsync_log" || \
+        fail "rsync did not fetch bob from /home"
+}
+
 run_profile_install inout
 run_profile_install relay
 run_noble_relay_package_test
 run_legacy_networks_migration_test
 run_postfixer_symlink_materialization_test
 run_modular_import_test
+run_importer_ssh_policy_test
+run_maildir_sync_test
 
 printf 'profile install tests passed\n'
