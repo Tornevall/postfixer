@@ -146,10 +146,15 @@ run_profile_install() {
     assert_log_contains "$log_file" "postconf -P submission/inet/smtpd_sasl_auth_enable=yes"
     assert_log_contains "$log_file" "postconf -P submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject"
     assert_log_contains "$log_file" "postconf -e mynetworks = ${config_dir}/networks"
+    assert_log_contains "$log_file" "postconf -e relayhost = [relay-upstream.example.com]"
+    assert_log_contains "$log_file" "postconf -e smtp_fallback_relay = [relay-fallback.example.com]"
+    assert_log_contains "$log_file" "postconf -e relay_domains = ${config_dir}/relay-domains"
+    assert_log_contains "$log_file" "postconf -e transport_maps = hash:${config_dir}/transport"
     assert_log_contains "$log_file" "postconf -M policyd-spf/unix=policyd-spf unix - n n - 0 spawn user=policyd-spf argv=/usr/bin/policyd-spf"
 
     if [[ "$role" == inout ]]; then
         assert_log_contains "$log_file" "configure_courier inout"
+        assert_log_contains "$log_file" 'postconf -e mydestination = $myhostname, localhost.$mydomain, localhost,'
         assert_log_contains "$log_file" "postconf -e home_mailbox = Maildir/"
     else
         assert_log_not_contains "$log_file" "configure_courier relay"

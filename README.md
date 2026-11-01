@@ -201,6 +201,10 @@ Postfixer also refuses a node configuration where the configured primary or fall
 
 Postfixer supports both.
 
+No existing Postfix or Postfixer configuration is required for an interactive installation on a clean Ubuntu server. `sudo make install-server` or `sudo make install-relay` creates the node configuration from the answers, installs the packages, keeps the package-generated base files and applies the answers to the active Postfix configuration with `postconf`.
+
+The administrator still needs a resolvable FQDN, correct DNS planning and an externally managed TLS certificate. A hybrid mailbox server also needs local Unix users, created fresh or migrated with their Maildirs. Old `main.cf`, `master.cf` or Postfixer files are optional migration sources, not prerequisites.
+
 If this exists:
 
 ```text
@@ -216,6 +220,24 @@ Backups are written below:
 ```text
 /root/postfixer-backup-*
 ```
+
+### How installer answers update Postfix
+
+The installer does not generate a host-specific `main.cf` template. It stores node answers below `/etc/postfix/postfixer.d` and updates the package-generated `/etc/postfix/main.cf` safely through `postconf`:
+
+| Installer answer | Stored or applied as | Active Postfix setting |
+| --- | --- | --- |
+| Hybrid or relay role | `POSTFIXER_ROLE` | Local delivery, recipient checks and role-specific services |
+| SMTP/server hostname | System FQDN | Postfix `$myhostname` default and SMTP banner |
+| Default mail domain | `/etc/mailname` and `local-domains` for hybrid | `myorigin` and `mydestination` |
+| Primary outbound relay | `POSTFIXER_RELAYHOST` | `relayhost` |
+| Fallback outbound relays | `POSTFIXER_FALLBACK_RELAYS` | `smtp_fallback_relay` |
+| Certificate domain | `POSTFIXER_CERT_DOMAIN` | SMTP certificate/key paths and submission TLS |
+| Trusted relay networks | `postfixer.d/networks` | `mynetworks` |
+| Non-local relay domains | `postfixer.d/relay-domains` | `relay_domains` |
+| Final host for relay domains | `postfixer.d/transport` | `transport_maps` |
+
+The installer also manages submission and policy services in `master.cf` with `postconf -M` and `postconf -P`. Re-running `make apply` reapplies the stored answers without requiring the interactive questions again.
 
 ## SMTP submission and SASL
 

@@ -6,6 +6,8 @@ All notable changes to Postfixer are documented in this file.
 
 ### Changed
 
+- Clarified clean-server installation and documented how every interactive node
+  answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented that Postfixer originated as a personal migration tool for an
   existing production mail server while remaining generic and reusable.
 - Required passwordless SSH key or agent authentication for remote Postfix and
