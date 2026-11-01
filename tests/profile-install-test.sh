@@ -114,6 +114,7 @@ run_profile_install() {
         install_base_stack() {
             printf 'install_base_stack %s\n' "$POSTFIXER_ROLE" >> "$TEST_COMMAND_LOG"
             install_required_packages postfix sasl2-bin libsasl2-2 libsasl2-modules postfix-policyd-spf-python postgrey opendkim opendmarc
+            install_required_packages spamd
             install_optional_packages curl wget swaks mailgraph rrdtool certbot python3-certbot
         }
         run_release_install() {
@@ -142,6 +143,7 @@ run_profile_install() {
 
     assert_log_contains "$log_file" "configure_saslauthd ${role}"
     assert_log_contains "$log_file" "install_optional_packages curl wget swaks mailgraph rrdtool certbot python3-certbot"
+    assert_log_contains "$log_file" "install_required_packages spamd"
     assert_log_contains "$log_file" "configure_smtp_pam ${role}"
     assert_log_contains "$log_file" "postconf -e smtpd_sasl_auth_enable = no"
     assert_log_contains "$log_file" "postconf -M submission/inet=submission inet n - y - - smtpd"

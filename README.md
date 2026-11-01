@@ -221,7 +221,7 @@ Backups are written below:
 /root/postfixer-backup-*
 ```
 
-They include Postfix, Courier, SASL/PAM and SpamAssassin rules and daemon defaults.
+They include Postfix, Courier, SASL/PAM and SpamAssassin rules and daemon defaults. Ubuntu 24.04 installs the daemon from its separate `spamd` package; older supported Ubuntu releases may provide it through `spamassassin` itself.
 
 ### How installer answers update Postfix
 

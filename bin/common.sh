@@ -139,7 +139,7 @@ backup_existing_configuration() {
 
     for path in \
         /etc/postfix /etc/courier \
-        /etc/default/saslauthd /etc/default/spamassassin /etc/spamassassin \
+        /etc/default/saslauthd /etc/default/spamassassin /etc/default/spamd /etc/spamassassin \
         /etc/pam.d/imap /etc/pam.d/pop3; do
         [[ -e "$path" || -L "$path" ]] || continue
 
@@ -173,6 +173,10 @@ install_base_stack() {
         fetchmail procmail \
         opendkim opendkim-tools opendmarc \
         courier-authdaemon courier-authlib courier-authlib-pipe courier-authlib-userdb
+
+    if apt_has_candidate spamd; then
+        install_required_packages spamd
+    fi
 
     install_optional_packages curl wget swaks mailgraph rrdtool certbot python3-certbot
 }

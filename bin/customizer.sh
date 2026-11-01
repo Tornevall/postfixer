@@ -12,7 +12,7 @@ POSTFIXER_CONFIG="${POSTFIXER_CONFIG:-${POSTFIXER_ETC}/postfixer.conf}"
 POSTFIXER_CONFIG_SOURCE="${POSTFIXER_CONFIG_SOURCE:-${ROOT_DIR}/etc-postfixer}"
 POSTFIXER_SAMPLES_DIR="${POSTFIXER_SAMPLES_DIR:-}"
 POSTFIXER_LEGACY_ETC="${POSTFIXER_LEGACY_ETC:-/etc/postfixer}"
-SPAMASSASSIN_DEFAULTS="${SPAMASSASSIN_DEFAULTS:-/etc/default/spamassassin}"
+SPAMASSASSIN_DEFAULTS="${SPAMASSASSIN_DEFAULTS:-}"
 
 # Preserve shared implementations before overriding them.
 eval "$(declare -f install_courier_from_archive | sed '1s/install_courier_from_archive/postfixer_common_install_courier_from_archive/')"
@@ -361,13 +361,23 @@ postconf_set() {
 }
 
 configure_spamassassin_node() {
+    local defaults_file
+
     log "Configuring local SpamAssassin with spamd hosts: ${POSTFIXER_SPAMD_HOSTS}"
 
-    install -d -m 0755 "$(dirname "$SPAMASSASSIN_DEFAULTS")"
-    touch "$SPAMASSASSIN_DEFAULTS"
-    set_equals_value "$SPAMASSASSIN_DEFAULTS" ENABLED 1
-    set_equals_value "$SPAMASSASSIN_DEFAULTS" OPTIONS '"--create-prefs --max-children 5 --helper-home-dir -i 127.0.0.1"'
-    set_equals_value "$SPAMASSASSIN_DEFAULTS" CRON 1
+    if [[ -n "$SPAMASSASSIN_DEFAULTS" ]]; then
+        defaults_file="$SPAMASSASSIN_DEFAULTS"
+    elif [[ -e /etc/default/spamd ]]; then
+        defaults_file=/etc/default/spamd
+    else
+        defaults_file=/etc/default/spamassassin
+    fi
+
+    install -d -m 0755 "$(dirname "$defaults_file")"
+    touch "$defaults_file"
+    set_equals_value "$defaults_file" ENABLED 1
+    set_equals_value "$defaults_file" OPTIONS '"--create-prefs --max-children 5 --helper-home-dir -i 127.0.0.1"'
+    set_equals_value "$defaults_file" CRON 1
 
     postconf -M "spamassassin/unix=spamassassin unix - n n - - pipe flags=Rq user=debian-spamd argv=/usr/bin/spamc -f -n 10 -t 120 -d ${POSTFIXER_SPAMD_HOSTS} -e /usr/sbin/sendmail -oi -f \${sender} \${recipient}"
     postconf -P 'smtp/inet/content_filter=spamassassin'
@@ -570,8 +580,8 @@ enable_and_restart_services() {
 }
 
 check_mail_stack() {
-    local failed=0 service
-    local services=(postfix postgrey opendkim opendmarc spamassassin)
+    local failed=0 service spam_service
+    local services=(postfix postgrey opendkim opendmarc)
 
     load_postfixer_config
     log "Checking ${POSTFIXER_ROLE} mail stack"
@@ -594,7 +604,9 @@ check_mail_stack() {
         failed=1
     fi
 
-    services+=(saslauthd)
+    spam_service=spamassassin
+    service_exists spamd && spam_service=spamd
+    services+=(saslauthd "$spam_service")
     if [[ ! -S /var/spool/postfix/var/run/saslauthd/mux ]]; then
         warn "saslauthd mux socket is missing from the Postfix chroot."
         failed=1
@@ -612,7 +624,7 @@ check_mail_stack() {
     done
 
     if command -v ss >/dev/null 2>&1; then
-        if systemctl is-active --quiet spamassassin.service 2>/dev/null && \
+        if systemctl is-active --quiet "${spam_service}.service" 2>/dev/null && \
             ! ss -ltn 2>/dev/null | awk '$4 ~ /127\.0\.0\.1:783$/ {found=1} END {exit !found}'; then
             warn "SpamAssassin is active but spamd is not listening on 127.0.0.1:783."
             failed=1
