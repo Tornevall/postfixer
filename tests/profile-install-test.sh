@@ -363,7 +363,21 @@ EOF_SSH
 set -Eeuo pipefail
 printf '%s\n' "$*" >> "$RSYNC_LOG"
 EOF_RSYNC
-    chmod 0755 "${mock_dir}/ssh" "${mock_dir}/rsync"
+    cat > "${mock_dir}/getent" <<'EOF_GETENT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "$1" == passwd && "$2" == alice ]]; then
+    printf '%s\n' 'alice:x:1000:1000::/tmp/postfixer-test-home/alice:/bin/bash'
+elif [[ "$1" == passwd && "$2" == testmailserver ]]; then
+    printf '%s\n' 'testmailserver:x:1000:1000::/tmp/postfixer-test-home/testmail:/bin/bash'
+fi
+EOF_GETENT
+    cat > "${mock_dir}/chown" <<'EOF_CHOWN'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exit 0
+EOF_CHOWN
+    chmod 0755 "${mock_dir}/ssh" "${mock_dir}/rsync" "${mock_dir}/getent" "${mock_dir}/chown"
 
     PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
     REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
@@ -384,7 +398,7 @@ EOF_RSYNC
 
     PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
     REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
-    FINAL_SYNC_CONFIRM=source-frozen \
+    FINAL_SYNC_CONFIRM=source-frozen TARGET_HOME_ROOT=/tmp/postfixer-test-home \
         bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildirs-final \
         >/dev/null
 
@@ -417,7 +431,7 @@ EOF_RSYNC
         fail "rsync did not fetch alice from /home"
     grep -Fq 'root@mail-old.example.com:/home/testmail/Maildir/' "$rsync_log" || \
         fail "rsync did not use the passwd-backed home path for testmailserver"
-    [[ "$(grep -Fc -- '--delete' "$rsync_log")" == 2 ]] || \
+    [[ "$(grep -Fc -- '--delete' "$rsync_log")" == 4 ]] || \
         fail "only confirmed final Maildir synchronization should use --delete"
 }
 

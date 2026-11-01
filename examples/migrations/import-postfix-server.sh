@@ -9,6 +9,7 @@ umask 077
 REMOTE="${REMOTE:-}"
 REMOTE_POSTFIX_DIR="${REMOTE_POSTFIX_DIR:-/etc/postfix}"
 REMOTE_HOME_ROOT="${REMOTE_HOME_ROOT:-/home}"
+TARGET_HOME_ROOT="${TARGET_HOME_ROOT:-/home}"
 STAGING_ROOT="${STAGING_ROOT:-/root/postfixer-migration}"
 MIGRATION_NAME="${MIGRATION_NAME:-postfix-import}"
 STAGING_DIR="${STAGING_DIR:-${STAGING_ROOT}/${MIGRATION_NAME}}"
@@ -38,8 +39,8 @@ Actions:
                     matching passwd/shadow entries into staging, mode 0600.
   --fetch-maildirs   Pre-sync Maildirs into root-only staging without deleting files.
   --fetch-maildirs-final
-                    Make staging exactly match the frozen source, including deletions.
-                    Requires FINAL_SYNC_CONFIRM=source-frozen.
+                    Make staging and target Maildirs exactly match the frozen source,
+                    including deletions. Requires FINAL_SYNC_CONFIRM=source-frozen.
   --diff-local      Diff fetched files against local /etc/postfix.
   --install-modular Install non-secret map files below /etc/postfix/postfixer.d/imports.
 
@@ -49,6 +50,7 @@ Defaults:
   OpenSSH configuration selects identities, jump hosts and other connection options.
   REMOTE_POSTFIX_DIR=/etc/postfix
   REMOTE_HOME_ROOT=/home
+  TARGET_HOME_ROOT=/home
   STAGING_DIR=/root/postfixer-migration/postfix-import
   IMPORT_TARGET=/etc/postfix/postfixer.d/imports/postfix-import
 
@@ -96,6 +98,10 @@ require_remote() {
         "REMOTE_HOME_ROOT must be an absolute path without spaces or shell characters."
     [[ "$REMOTE_HOME_ROOT" != *'/../'* && "$REMOTE_HOME_ROOT" != */.. && "$REMOTE_HOME_ROOT" != *'/./'* ]] || die \
         "REMOTE_HOME_ROOT must not contain dot path segments."
+    [[ "$TARGET_HOME_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || die \
+        "TARGET_HOME_ROOT must be an absolute path without spaces or shell characters."
+    [[ "$TARGET_HOME_ROOT" != *'/../'* && "$TARGET_HOME_ROOT" != */.. && "$TARGET_HOME_ROOT" != *'/./'* ]] || die \
+        "TARGET_HOME_ROOT must not contain dot path segments."
     ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" true || die \
         "Passwordless SSH failed for ${REMOTE}. Configure an SSH key or agent and verify it with: ssh -o BatchMode=yes ${REMOTE} true"
 }
@@ -218,7 +224,7 @@ fetch_maildir_users() {
 fetch_maildirs() {
     local delete_mode="${1:-no}"
     local paths_file="${STAGING_DIR}/maildir-paths.tsv"
-    local user remote_maildir target
+    local user remote_maildir target target_maildir target_home target_uid target_gid
     local rsync_delete=()
 
     if [[ "$delete_mode" == yes ]]; then
@@ -245,6 +251,19 @@ fetch_maildirs() {
             -e "$RSYNC_SSH_COMMAND" \
             "${REMOTE}:${remote_maildir}/" \
             "${target}/"
+
+        if [[ "$delete_mode" == yes ]]; then
+            target_home="$(getent passwd "$user" | cut -d: -f6)"
+            [[ "$target_home" == "${TARGET_HOME_ROOT%/}/"* ]] || die \
+                "Target home for ${user} is outside TARGET_HOME_ROOT: ${target_home}"
+            target_uid="$(getent passwd "$user" | cut -d: -f3)"
+            target_gid="$(getent passwd "$user" | cut -d: -f4)"
+            target_maildir="${target_home%/}/Maildir"
+            install -d -m 0700 "$target_maildir"
+            rsync -aHAX --numeric-ids --delete --partial --info=stats2 \
+                "${target}/" "${target_maildir}/"
+            chown "$target_uid:$target_gid" "$target_maildir"
+        fi
     done < "$paths_file"
 
     log "Maildir staging completed below ${MAILDIR_STAGING_DIR}"

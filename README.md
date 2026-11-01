@@ -772,6 +772,11 @@ Schedule a short maintenance window. Immediately before the freeze, confirm that
 4. Copy the exact staged Maildirs into the corresponding target home directories with `rsync -aHAX --numeric-ids --delete`. Use `maildir-paths.tsv` and the staged passwd home field rather than assuming the username equals the home-directory basename.
 5. Verify account count, Maildir count, file count, numeric ownership, home permissions and available disk space.
 
+`make import-mail-final` performs step 4 automatically. It resolves each target
+home from the local passwd database, synchronizes the exact Maildir below that
+home and applies the target user's UID/GID to the Maildir directory. The target
+root can be changed with `TARGET_HOME_ROOT` and defaults to `/home`.
+
 #### Phase 5: validate before changing MX
 
 1. Run:
@@ -786,6 +791,24 @@ Schedule a short maintenance window. Immediately before the freeze, confirm that
 3. Deliver test messages through port 25 and submission, confirm Maildir delivery, SpamAssassin headers, DKIM signing/verification and outbound routing.
 4. Confirm that local `spamd` is primary, any remote `spamd` is only failover, and mail still passes unfiltered if every `spamd` is intentionally stopped for the test.
 5. Confirm the final hostname, forward DNS, reverse DNS, SMTP banner and certificate names.
+
+#### Completed migration example: inbound.tornevall.net
+
+The migration from `inbound-1` was completed with the following result:
+
+- The target was installed as a hybrid Postfix/Courier server and renamed to `inbound.tornevall.net`.
+- 24 Maildir-backed accounts were imported; discovery was restricted to users with a matching `/home/*/Maildir`.
+- Maildirs were pre-synced while the source remained live, then the source Postfix and Courier services were stopped and masked.
+- The final exact sync copied all 24 Maildirs into the target users' `/home` directories. A second rsync dry-run found zero differences and zero ownership errors.
+- The target `make check` passed, SMTP port 25 returned the `inbound.tornevall.net` banner, and the target Postfix queue was empty.
+- The old server retained six deferred outbound requests (16 KiB total). They were not deleted or mixed into the mailbox import.
+- The authoritative MX changed from `inbound-1.tornevall.net` to `inbound.tornevall.net`; `smtp4.tornevall.net` remained the priority-20 secondary MX.
+- Reverse DNS for `212.63.208.4` was changed to `inbound.tornevall.net` without changing MX before cutover.
+
+The migration was performed by the importer and shell administration commands,
+but the procedure above is the reproducible operator-facing description. Future
+migrations must repeat the domain-map, queue, account-password and validation
+reviews because source systems differ.
 
 #### Phase 6: change MX last
 

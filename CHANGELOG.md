@@ -42,6 +42,10 @@ All notable changes to Postfixer are documented in this file.
 - Documented SpamAssassin fail-open behavior and the complete production
   replacement runbook from target preparation and pre-sync through source
   freeze, exact import, MX cutover, rollback and sensitive-data cleanup.
+- Final Maildir imports now synchronize each staged mailbox into the matching
+  target `/home` directory and apply the target user's ownership.
+- Documented the completed `inbound-1` to `inbound.tornevall.net` migration,
+  queue handling, verification results and MX/PTR cutover.
 
 ## 2026-11-01 - Initial working release candidate
 
