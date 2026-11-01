@@ -319,6 +319,12 @@ submission inet n - y - - smtpd
 
 A valid externally synchronized TLS certificate is mandatory before the submission service is enabled. The installer fails closed instead of exposing a half-working authentication service.
 
+Postfixer also enables authenticated SMTPS compatibility on port 465 for older
+clients such as Outlook Express. Port 465 uses implicit TLS from the first byte
+and advertises `AUTH PLAIN LOGIN` only inside the encrypted session. Port 587
+remains the preferred modern endpoint using explicit STARTTLS; port 25 remains
+unauthenticated server-to-server SMTP.
+
 ## TLS policy
 
 Certificates are not issued by Postfixer.

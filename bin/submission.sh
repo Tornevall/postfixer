@@ -85,11 +85,33 @@ configure_submission_service() {
     postconf -P 'submission/inet/content_filter=spamassassin'
 }
 
+configure_smtps_service() {
+    # Outlook Express commonly expects implicit TLS (SMTPS) on port 465.
+    # Keep this separate from RFC 6409 submission on port 587, which uses
+    # explicit STARTTLS. Both services require authentication and never expose
+    # AUTH on plaintext SMTP.
+    postconf -M 'smtps/inet=smtps inet n - y - - smtpd'
+    postconf -P 'smtps/inet/syslog_name=postfix/smtps'
+    postconf -P 'smtps/inet/smtpd_tls_wrappermode=yes'
+    postconf -P 'smtps/inet/smtpd_tls_security_level=encrypt'
+    postconf -P 'smtps/inet/smtpd_tls_auth_only=yes'
+    postconf -P 'smtps/inet/smtpd_sasl_auth_enable=yes'
+    postconf -P 'smtps/inet/smtpd_sasl_type=cyrus'
+    postconf -P 'smtps/inet/smtpd_sasl_path=smtpd'
+    postconf -P 'smtps/inet/smtpd_sasl_security_options=noanonymous'
+    postconf -P 'smtps/inet/smtpd_sasl_tls_security_options=noanonymous'
+    postconf -P 'smtps/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject'
+    postconf -P 'smtps/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject'
+    postconf -P 'smtps/inet/milter_macro_daemon_name=ORIGINATING'
+    postconf -P 'smtps/inet/content_filter=spamassassin'
+}
+
 configure_postfix_node() {
     postfixer_node_configure_postfix_node "$@"
     configure_tls_policy
     configure_cyrus_sasl_server
     configure_submission_service
+    configure_smtps_service
 }
 
 check_submission_protocol() {
@@ -144,6 +166,25 @@ check_submission_configuration() {
         failed=1
     fi
 
+    if ! postconf -M smtps/inet >/dev/null 2>&1; then
+        warn "SMTPS service is missing from master.cf."
+        failed=1
+    else
+        for spec in \
+            'smtpd_tls_wrappermode=yes' \
+            'smtpd_tls_security_level=encrypt' \
+            'smtpd_sasl_auth_enable=yes' \
+            'smtpd_sasl_type=cyrus' \
+            'smtpd_sasl_path=smtpd' \
+            'smtpd_relay_restrictions=permit_sasl_authenticated,reject'; do
+            value="$(postconf -P "smtps/inet/${spec%%=*}" 2>/dev/null | sed -E 's/^[^=]+=[[:space:]]*//' || true)"
+            if [[ "$value" != "${spec#*=}" ]]; then
+                warn "SMTPS setting mismatch: ${spec} (active value: ${value:-missing})"
+                failed=1
+            fi
+        done
+    fi
+
     for spec in \
         'smtpd_tls_security_level=encrypt' \
         'smtpd_tls_auth_only=yes' \
@@ -179,6 +220,13 @@ check_submission_configuration() {
             warn "Postfix is active but nothing is listening on TCP port 587."
             failed=1
         elif ! check_submission_protocol; then
+            failed=1
+        fi
+        if ! ss -ltn 2>/dev/null | awk '$4 ~ /:465$/ {found=1} END {exit !found}'; then
+            warn "Postfix is active but nothing is listening on TCP port 465."
+            failed=1
+        elif ! timeout 8 openssl s_client -quiet -crlf -connect 127.0.0.1:465 </dev/null >/dev/null 2>&1; then
+            warn "Port 465 does not complete an implicit TLS handshake."
             failed=1
         fi
     fi

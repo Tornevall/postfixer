@@ -18,6 +18,9 @@ All notable changes to Postfixer are documented in this file.
 - Kept the responsive site-local resolver at `62.171.175.28`, added the
   requested `5.75.250.68` and `95.216.170.246` resolvers, and removed public
   fallback resolvers from the personal SpamAssassin profile.
+- Added authenticated SMTPS compatibility on port 465 with implicit TLS for
+  older clients such as Outlook Express, while retaining STARTTLS submission
+  on port 587 and keeping port 25 free of client authentication.
 - Clarified clean-server installation and documented how every interactive node
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,
