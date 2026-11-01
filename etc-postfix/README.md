@@ -4,7 +4,7 @@ This directory is the repository-side source for Postfix files that should be co
 
 A fresh server does not need Postfix installed before this repository is cloned. `make install` installs Postfix first when `/etc/postfix/main.cf` does not exist, then applies this tree.
 
-Server-specific identity and routing do not belong here. Configure those under `/etc/postfixer/` instead.
+Server-specific identity and routing do not belong here. Configure those under `/etc/postfix/postfixer.d/` instead.
 
 Typical shared files may include:
 

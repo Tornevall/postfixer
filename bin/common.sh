@@ -22,9 +22,9 @@ COURIER_SOURCE_BASE="${COURIER_SOURCE_BASE:-https://archive.ubuntu.com/ubuntu/po
 COURIER_BUILD_ROOT="${COURIER_BUILD_ROOT:-/usr/local/src/postfixer-courier}"
 COURIER_JAMMY_VERSION="${COURIER_JAMMY_VERSION:-1.0.16-3build3}"
 COURIER_JAMMY_IMAP_VERSION="${COURIER_JAMMY_IMAP_VERSION:-5.0.13+1.0.16-3build3}"
-COURIER_JAMMY_BASE="${COURIER_JAMMY_BASE:-http://se.archive.ubuntu.com/ubuntu/pool/universe/c/courier}"
+COURIER_JAMMY_BASE="${COURIER_JAMMY_BASE:-https://se.archive.ubuntu.com/ubuntu/pool/universe/c/courier}"
 GAMIN_JAMMY_VERSION="${GAMIN_JAMMY_VERSION:-0.1.10-6}"
-GAMIN_JAMMY_BASE="${GAMIN_JAMMY_BASE:-http://se.archive.ubuntu.com/ubuntu/pool/universe/g/gamin}"
+GAMIN_JAMMY_BASE="${GAMIN_JAMMY_BASE:-https://se.archive.ubuntu.com/ubuntu/pool/universe/g/gamin}"
 COURIER_JAMMY_ROOT="${COURIER_JAMMY_ROOT:-/usr/local/src/postfixer-courier-jammy}"
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
@@ -701,6 +701,14 @@ maintenance_action() {
         check)
             check_mail_stack
             ;;
+        status)
+            load_postfixer_config
+            printf 'Role: %s\nHostname: %s\nMail domain: %s\nConfig: %s\n\n' \
+                "$POSTFIXER_ROLE" "$POSTFIXER_HOSTNAME" "$POSTFIXER_MAIL_DOMAIN" "$POSTFIXER_CONFIG"
+            systemctl --no-pager --plain is-active \
+                postfix saslauthd postgrey opendkim opendmarc \
+                courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl 2>/dev/null || true
+            ;;
         restart)
             enable_and_restart_services
             check_mail_stack
@@ -719,6 +727,7 @@ Usage:
   sudo bin/install.sh --maps
   sudo bin/install.sh --cert
   sudo bin/install.sh --check
+  sudo bin/install.sh --status
   sudo bin/install.sh --restart
 
 Environment overrides:
@@ -743,6 +752,9 @@ main() {
             ;;
         --check)
             maintenance_action check
+            ;;
+        --status)
+            maintenance_action status
             ;;
         --restart)
             maintenance_action restart

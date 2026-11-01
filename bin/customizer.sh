@@ -7,12 +7,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     exit 64
 fi
 
-POSTFIXER_ETC="${POSTFIXER_ETC:-/etc/postfixer}"
+POSTFIXER_ETC="${POSTFIXER_ETC:-/etc/postfix/postfixer.d}"
 POSTFIXER_CONFIG="${POSTFIXER_CONFIG:-${POSTFIXER_ETC}/postfixer.conf}"
 POSTFIXER_CONFIG_SOURCE="${POSTFIXER_CONFIG_SOURCE:-${ROOT_DIR}/etc-postfixer}"
+POSTFIXER_SAMPLES_DIR="${POSTFIXER_SAMPLES_DIR:-}"
+POSTFIXER_LEGACY_ETC="${POSTFIXER_LEGACY_ETC:-/etc/postfixer}"
 
 # Preserve shared implementations before overriding them.
 eval "$(declare -f install_courier_from_archive | sed '1s/install_courier_from_archive/postfixer_common_install_courier_from_archive/')"
+eval "$(declare -f install_courier_from_jammy_packages | sed '1s/install_courier_from_jammy_packages/postfixer_common_install_courier_from_jammy_packages/')"
 eval "$(declare -f build_courier_for_noble | sed '1s/build_courier_for_noble/postfixer_common_build_courier_for_noble/')"
 eval "$(declare -f deploy_courier_certificate | sed '1s/deploy_courier_certificate/postfixer_common_deploy_courier_certificate/')"
 eval "$(declare -f apply_postfix_configuration | sed '1s/apply_postfix_configuration/postfixer_common_apply_postfix_configuration/')"
@@ -89,6 +92,7 @@ is_fqdn() {
 
 create_postfixer_config() {
     local detected_hostname detected_domain role hostname_value mail_domain relayhost fallbacks cert_domain trusted_networks
+    local relay_domains="" relay_destination="" domain
 
     install -d -m 0755 "$POSTFIXER_ETC"
 
@@ -115,13 +119,27 @@ Choose one role:
 
 EOF_INTRO
 
-    role="$(prompt_value 'Node role (inout/relay)' 'inout')"
+    role="$(prompt_value 'Node role (inout/relay)' "${POSTFIXER_ROLE_HINT:-inout}")"
+    case "$role" in
+        inout|relay) ;;
+        *) die "Invalid role: ${role}. Choose inout or relay." ;;
+    esac
     hostname_value="$(prompt_fqdn 'SMTP/server hostname (FQDN)' "$detected_hostname")"
     mail_domain="$(prompt_fqdn 'Default mail domain' "$detected_domain")"
     relayhost="$(prompt_optional 'Primary outbound relay in Postfix syntax, for example [relay-2.example.com] (blank = direct delivery)')"
     fallbacks="$(prompt_optional 'Fallback outbound relays separated by spaces, for example [relay-3.example.com] [relay-4.example.com]')"
     cert_domain="$(prompt_fqdn 'Certificate domain under /etc/letsencrypt/live' "$hostname_value")"
     trusted_networks="$(prompt_optional 'Trusted relay networks/IPs separated by spaces, for example 10.0.0.0/8 192.0.2.10 [2001:db8::]/32 (blank = edit later)')"
+
+    if [[ "$role" == relay ]]; then
+        relay_domains="$(prompt_required_value 'Domains accepted by this relay, separated by spaces')"
+        relay_destination="$(prompt_required_value 'Final delivery host in Postfix syntax, for example [mail.example.com]')"
+    else
+        relay_domains="$(prompt_optional 'Optional non-local domains relayed by this hybrid server, separated by spaces')"
+        if [[ -n "$relay_domains" ]]; then
+            relay_destination="$(prompt_required_value 'Final delivery host for those relay domains, for example [mail.example.com]')"
+        fi
+    fi
 
     {
         printf '# Postfixer node configuration. This file is the source of truth for server-specific settings.\n'
@@ -151,7 +169,68 @@ EOF_INTRO
         chmod 0644 "${POSTFIXER_ETC}/networks"
     fi
 
+    if [[ "$role" == inout ]]; then
+        printf '%s\n' "$mail_domain" > "${POSTFIXER_ETC}/local-domains"
+        chmod 0644 "${POSTFIXER_ETC}/local-domains"
+    fi
+
+    if [[ -n "$relay_domains" ]]; then
+        : > "${POSTFIXER_ETC}/relay-domains"
+        : > "${POSTFIXER_ETC}/transport"
+        for domain in $relay_domains; do
+            printf '%s\n' "$domain" >> "${POSTFIXER_ETC}/relay-domains"
+            printf '%s relay:%s\n' "$domain" "$relay_destination" >> "${POSTFIXER_ETC}/transport"
+        done
+        chmod 0644 "${POSTFIXER_ETC}/relay-domains" "${POSTFIXER_ETC}/transport"
+    fi
+
     log "Created ${POSTFIXER_CONFIG}"
+}
+
+migrate_legacy_postfixer_tree() {
+    [[ -f "${POSTFIXER_LEGACY_ETC}/postfixer.conf" ]] || return 0
+    [[ ! -e "$POSTFIXER_CONFIG" ]] || return 0
+
+    install -d -m 0755 "$POSTFIXER_ETC"
+    cp -a "${POSTFIXER_LEGACY_ETC}/." "$POSTFIXER_ETC/"
+    sed -i "s#${POSTFIXER_LEGACY_ETC}/#${POSTFIXER_ETC}/#g" "$POSTFIXER_CONFIG"
+    log "Migrated legacy Postfixer data from ${POSTFIXER_LEGACY_ETC} to ${POSTFIXER_ETC}"
+}
+
+materialize_postfixer_data_symlinks() {
+    local path temporary mode
+
+    [[ -d "$POSTFIXER_ETC" ]] || return 0
+
+    while IFS= read -r -d '' path; do
+        if [[ ! -f "$path" ]]; then
+            warn "Postfixer data symlink is broken or not a regular file: ${path}"
+            continue
+        fi
+
+        temporary="$(mktemp "${path}.postfixer.XXXXXX")"
+        mode="$(stat -Lc '%a' "$path")"
+        cat -- "$path" > "$temporary"
+        chmod "$mode" "$temporary"
+        mv -fT "$temporary" "$path"
+        log "Materialized Postfixer data symlink: ${path}"
+    done < <(find "$POSTFIXER_ETC" -maxdepth 1 -type l -print0)
+}
+
+install_postfixer_samples() {
+    local source samples_dir
+
+    samples_dir="${POSTFIXER_SAMPLES_DIR:-$(dirname "$(dirname "$POSTFIXER_CONFIG")")/samples-postfixer}"
+    install -d -m 0755 "$samples_dir"
+    for source in "${POSTFIXER_CONFIG_SOURCE}"/*.example; do
+        [[ -f "$source" ]] || continue
+        install -m 0644 "$source" "${samples_dir}/$(basename "$source")"
+    done
+
+    if [[ -d "${ROOT_DIR}/samples-postfixer" ]]; then
+        cp -a "${ROOT_DIR}/samples-postfixer/." "$samples_dir/"
+        find "$samples_dir" -type f -exec chmod 0644 {} +
+    fi
 }
 
 install_postfixer_data_file() {
@@ -184,6 +263,9 @@ install_networks_file() {
 }
 
 load_postfixer_config() {
+    migrate_legacy_postfixer_tree
+    materialize_postfixer_data_symlinks
+    install_postfixer_samples
     [[ -f "$POSTFIXER_CONFIG" ]] || create_postfixer_config
 
     # shellcheck disable=SC1090
@@ -282,6 +364,8 @@ configure_postfix_node() {
 
     log "Applying Postfixer node profile: ${POSTFIXER_ROLE}"
 
+    postconf -M 'policyd-spf/unix=policyd-spf unix - n n - 0 spawn user=policyd-spf argv=/usr/bin/policyd-spf'
+
     postconf_set smtpd_banner '$myhostname ESMTP $mail_name'
     postconf_set myorigin /etc/mailname
     postconf_set mynetworks "$POSTFIXER_NETWORKS_FILE"
@@ -297,6 +381,7 @@ configure_postfix_node() {
     postconf_set non_smtpd_milters inet:127.0.0.1:18891
     postconf_set smtp_tls_security_level may
     postconf_set smtpd_tls_security_level may
+    postconf_set policyd-spf_time_limit 3600
 
     if [[ -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem" && -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/privkey.pem" ]]; then
         postconf_set smtpd_tls_cert_file "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem"
@@ -312,7 +397,7 @@ configure_postfix_node() {
 
     case "$POSTFIXER_ROLE" in
         inout)
-            postconf_set mydestination '$myhostname, localhost.$mydomain, localhost, /etc/postfixer/local-domains'
+            postconf_set mydestination "\$myhostname, localhost.\$mydomain, localhost, ${POSTFIXER_LOCAL_DOMAINS_FILE}"
             postconf_set local_recipient_maps 'proxy:unix:passwd.byname $alias_maps'
             postconf_set local_transport 'local:$myhostname'
             postconf_set home_mailbox Maildir/
@@ -402,6 +487,15 @@ install_courier_from_archive() {
     postfixer_common_install_courier_from_archive "$@"
 }
 
+install_courier_from_jammy_packages() {
+    load_postfixer_config
+    if [[ "$POSTFIXER_ROLE" == relay ]]; then
+        log "Relay profile selected - skipping Courier IMAP/POP packages"
+        return 0
+    fi
+    postfixer_common_install_courier_from_jammy_packages "$@"
+}
+
 build_courier_for_noble() {
     load_postfixer_config
     if [[ "$POSTFIXER_ROLE" == relay ]]; then
@@ -465,6 +559,11 @@ check_mail_stack() {
 
     postfix check
     postconf -n >/dev/null
+
+    if ! postconf -M policyd-spf/unix >/dev/null 2>&1; then
+        warn "Postfix policyd-spf service is missing from master.cf."
+        failed=1
+    fi
 
     services+=(saslauthd)
     if [[ ! -S /var/spool/postfix/var/run/saslauthd/mux ]]; then

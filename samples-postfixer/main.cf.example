@@ -1,0 +1,16 @@
+# Generic Postfixer reference. This file is not loaded automatically.
+smtpd_banner = $myhostname ESMTP $mail_name
+myorigin = /etc/mailname
+mynetworks = /etc/postfix/postfixer.d/networks
+relay_domains = /etc/postfix/postfixer.d/relay-domains
+relay_recipient_maps = hash:/etc/postfix/postfixer.d/relay-recipients
+transport_maps = hash:/etc/postfix/postfixer.d/transport
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, check_policy_service inet:127.0.0.1:10023, check_policy_service unix:private/policyd-spf
+milter_default_action = accept
+milter_protocol = 6
+smtpd_milters = inet:127.0.0.1:18891
+non_smtpd_milters = inet:127.0.0.1:18891
+
+# The active installer sets hostname, certificates, role-specific local delivery,
+# SMTP submission and relay routing from postfixer.d/postfixer.conf.

@@ -58,7 +58,7 @@ POSTFIXER_DKIM_DIR=${config_dir}/opendkim
 EOF_CONFIG
 
     cat > "${config_dir}/networks" <<'EOF_NETWORKS'
-# Trusted network fixture based on the mail01 shape.
+# Trusted network fixture with IPv4 and IPv6 entries.
 127.0.0.0/8
 10.0.0.0/8
 [::1]/128
@@ -146,6 +146,7 @@ run_profile_install() {
     assert_log_contains "$log_file" "postconf -P submission/inet/smtpd_sasl_auth_enable=yes"
     assert_log_contains "$log_file" "postconf -P submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject"
     assert_log_contains "$log_file" "postconf -e mynetworks = ${config_dir}/networks"
+    assert_log_contains "$log_file" "postconf -M policyd-spf/unix=policyd-spf unix - n n - 0 spawn user=policyd-spf argv=/usr/bin/policyd-spf"
 
     if [[ "$role" == inout ]]; then
         assert_log_contains "$log_file" "configure_courier inout"
@@ -156,6 +157,37 @@ run_profile_install() {
         assert_log_contains "$log_file" "systemctl enable saslauthd.service"
         assert_log_not_contains "$log_file" "systemctl disable --now saslauthd.service"
     fi
+}
+
+run_noble_relay_package_test() {
+    local run_dir="${TMP_ROOT}/noble-relay"
+    local config_dir="${run_dir}/etc-postfixer"
+    local log_file="${run_dir}/commands.log"
+
+    mkdir -p "$run_dir"
+    write_profile_config relay "$config_dir"
+    : > "$log_file"
+
+    (
+        cd "$ROOT_DIR"
+        source bin/common.sh
+        source bin/customizer.sh
+
+        export POSTFIXER_ETC="$config_dir"
+        export POSTFIXER_CONFIG="${config_dir}/postfixer.conf"
+
+        install_base_stack() { printf 'install_base_stack\n' >> "$log_file"; }
+        apt_has_candidate() { return 1; }
+        postfixer_common_install_courier_from_jammy_packages() { printf 'jammy_courier\n' >> "$log_file"; }
+        postfixer_common_build_courier_for_noble() { printf 'built_courier\n' >> "$log_file"; }
+
+        source bin/24.04.sh
+        install_release_packages >/dev/null
+    )
+
+    assert_log_contains "$log_file" "install_base_stack"
+    assert_log_not_contains "$log_file" "jammy_courier"
+    assert_log_not_contains "$log_file" "built_courier"
 }
 
 run_legacy_networks_migration_test() {
@@ -184,6 +216,7 @@ EOF_CONFIG
         # shellcheck source=../bin/customizer.sh
         source bin/customizer.sh
 
+        POSTFIXER_ETC="$config_dir"
         POSTFIXER_CONFIG="$config_dir/postfixer.conf"
         POSTFIXER_NETWORKS_FILE="${config_dir}/networks"
         install_networks_file() {
@@ -200,8 +233,68 @@ EOF_CONFIG
         fail "legacy networks file was not copied into POSTFIXER_NETWORKS_FILE"
 }
 
+run_postfixer_symlink_materialization_test() {
+    local run_dir="${TMP_ROOT}/symlink-materialization"
+    local config_dir="${run_dir}/postfixer.d"
+    local external_file="${run_dir}/external-networks"
+
+    mkdir -p "$config_dir"
+    printf '192.0.2.10\n' > "$external_file"
+    ln -s "$external_file" "${config_dir}/networks"
+
+    (
+        cd "$ROOT_DIR"
+        source bin/common.sh
+        source bin/customizer.sh
+
+        POSTFIXER_ETC="$config_dir"
+        materialize_postfixer_data_symlinks >/dev/null
+    )
+
+    [[ -f "${config_dir}/networks" && ! -L "${config_dir}/networks" ]] || \
+        fail "Postfixer data symlink was not materialized"
+    cmp -s "$external_file" "${config_dir}/networks" || \
+        fail "materialized Postfixer data changed content"
+}
+
+run_modular_import_test() {
+    local run_dir="${TMP_ROOT}/modular-import"
+    local fetched_dir="${run_dir}/fetched"
+    local import_target="${run_dir}/installed"
+    local output_file="${run_dir}/output.log"
+
+    mkdir -p "$fetched_dir"
+    printf 'example.net\n' > "${fetched_dir}/relaydomains"
+    printf 'example.net relay:[mail.example.net]\n' > "${fetched_dir}/transport"
+    printf '[smtp.example.net] user:secret\n' > "${fetched_dir}/sasl_passwd"
+    printf 'myhostname = old.example.net\n' > "${fetched_dir}/main.cf"
+    printf 'smtp inet n - y - - smtpd\n' > "${fetched_dir}/master.cf"
+    printf 'private key fixture\n' > "${fetched_dir}/private.pem"
+    printf 'generated map fixture\n' > "${fetched_dir}/transport.db"
+
+    FETCHED_DIR="$fetched_dir" \
+    IMPORT_TARGET="$import_target" \
+    MIGRATION_NAME=test-import \
+        bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --install-modular \
+        > "$output_file" 2>&1
+
+    [[ -f "${import_target}/relaydomains" ]] || fail "relay domains were not imported"
+    [[ -f "${import_target}/transport" ]] || fail "transport map was not imported"
+    [[ -f "${import_target}/README.import" ]] || fail "import manifest was not generated"
+    [[ ! -e "${import_target}/sasl_passwd" ]] || fail "SMTP credentials were imported"
+    [[ ! -e "${import_target}/main.cf" ]] || fail "main.cf was imported"
+    [[ ! -e "${import_target}/master.cf" ]] || fail "master.cf was imported"
+    [[ ! -e "${import_target}/private.pem" ]] || fail "private key material was imported"
+    [[ ! -e "${import_target}/transport.db" ]] || fail "generated map database was imported"
+    grep -Fq 'not active until main.cf references them' "$output_file" || \
+        fail "import activation warning was not printed"
+}
+
 run_profile_install inout
 run_profile_install relay
+run_noble_relay_package_test
 run_legacy_networks_migration_test
+run_postfixer_symlink_materialization_test
+run_modular_import_test
 
 printf 'profile install tests passed\n'

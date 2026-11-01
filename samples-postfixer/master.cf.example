@@ -1,0 +1,12 @@
+# Generic Postfixer service reference. This file is not loaded automatically.
+# Postfixer adds these services to the package-generated master.cf with postconf.
+
+policyd-spf unix - n n - 0 spawn
+    user=policyd-spf argv=/usr/bin/policyd-spf
+
+submission inet n - y - - smtpd
+    -o syslog_name=postfix/submission
+    -o smtpd_tls_security_level=encrypt
+    -o smtpd_tls_auth_only=yes
+    -o smtpd_sasl_auth_enable=yes
+    -o smtpd_relay_restrictions=permit_sasl_authenticated,reject

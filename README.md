@@ -4,7 +4,7 @@ Postfixer is a mail server customizer for Ubuntu.
 
 The purpose is to replace several generations of hand-built Postfix servers with one reproducible installer that can customize either a complete inbound/outbound mail server or a relay helper from the same repository.
 
-It is not intended to ship one server-specific `main.cf`. Shared Postfix configuration belongs in Git. Node identity, relay routing, trusted networks and role-specific settings belong under `/etc/postfixer`.
+It is not intended to ship one server-specific `main.cf`. Shared Postfix configuration belongs in Git. Node identity, relay routing, trusted networks and role-specific settings belong under `/etc/postfix/postfixer.d`.
 
 ## What Postfixer is intended to replace
 
@@ -31,9 +31,9 @@ Postfixer is meant to install and normalize that stack instead of assuming that 
 
 ## Node roles
 
-### `inout`
+### `inout` (recommended hybrid server)
 
-A complete inbound/outbound mail server and final Maildir destination.
+A complete inbound/outbound mail server and final Maildir destination. This is the default hybrid role: it delivers local user mail and can also relay selected non-local domains.
 
 It provides:
 
@@ -44,7 +44,7 @@ It provides:
 - Local Unix account authentication.
 - Local Maildir delivery.
 - Courier IMAP/POP services.
-- SpamAssassin, ClamAV, SPF, Postgrey, OpenDKIM and OpenDMARC.
+- SPF, Postgrey and OpenDKIM processing, plus installed SpamAssassin, ClamAV and OpenDMARC services ready for explicit filter wiring.
 - Relay and transport support for selected non-local domains.
 
 ### `relay`
@@ -61,7 +61,7 @@ It provides:
 - Trusted-network relay control.
 - Relay domains and transport maps.
 - Valid-recipient maps for public relay domains.
-- SpamAssassin, ClamAV, SPF, Postgrey, OpenDKIM and OpenDMARC.
+- SPF, Postgrey and OpenDKIM processing, plus installed SpamAssassin, ClamAV and OpenDMARC services ready for explicit filter wiring.
 - Primary and fallback outbound routing.
 
 It does not become a final mailbox server. Local Maildir delivery and Courier IMAP/POP are disabled.
@@ -80,17 +80,17 @@ POSTFIXER_RELAYHOST='[relay-2.example.com]'
 POSTFIXER_FALLBACK_RELAYS='[relay-3.example.com] [relay-4.example.com]'
 ```
 
-The receiving relay permits trusted servers through `/etc/postfixer/networks`.
+The receiving relay permits trusted servers through `/etc/postfix/postfixer.d/networks`.
 
 A relay domain for which the node is an MX should be routed with `relay_domains` and a transport map instead of being confused with the ordinary outbound `relayhost` path:
 
 ```text
-# /etc/postfixer/relay-domains
+# /etc/postfix/postfixer.d/relay-domains
 example.com
 ```
 
 ```text
-# /etc/postfixer/transport
+# /etc/postfix/postfixer.d/transport
 example.com relay:[mail-primary.example.com]
 ```
 
@@ -105,7 +105,7 @@ A relay does not check whether a recipient is a local Unix account. The domain i
 Internet-facing relay nodes should synchronize valid recipients from the final delivery server into:
 
 ```text
-/etc/postfixer/relay-recipients
+/etc/postfix/postfixer.d/relay-recipients
 ```
 
 Example:
@@ -131,7 +131,7 @@ Split delivery can be added later with an explicit recipient source and `fallbac
 Node-specific settings live in:
 
 ```text
-/etc/postfixer/postfixer.conf
+/etc/postfix/postfixer.d/postfixer.conf
 ```
 
 Example:
@@ -144,30 +144,36 @@ POSTFIXER_RELAYHOST='[relay-1.example.com]'
 POSTFIXER_FALLBACK_RELAYS='[relay-2.example.com]'
 POSTFIXER_CERT_DOMAIN=mail-primary.example.com
 
-POSTFIXER_NETWORKS_FILE=/etc/postfixer/networks
-POSTFIXER_LOCAL_DOMAINS_FILE=/etc/postfixer/local-domains
-POSTFIXER_RELAY_DOMAINS_FILE=/etc/postfixer/relay-domains
-POSTFIXER_RELAY_RECIPIENTS_FILE=/etc/postfixer/relay-recipients
-POSTFIXER_TRANSPORT_FILE=/etc/postfixer/transport
+POSTFIXER_NETWORKS_FILE=/etc/postfix/postfixer.d/networks
+POSTFIXER_LOCAL_DOMAINS_FILE=/etc/postfix/postfixer.d/local-domains
+POSTFIXER_RELAY_DOMAINS_FILE=/etc/postfix/postfixer.d/relay-domains
+POSTFIXER_RELAY_RECIPIENTS_FILE=/etc/postfix/postfixer.d/relay-recipients
+POSTFIXER_TRANSPORT_FILE=/etc/postfix/postfixer.d/transport
 POSTFIXER_DKIM_DIR=/etc/opendkim
 ```
 
 The related data files are:
 
 ```text
-/etc/postfixer/
-|-- postfixer.conf
-|-- networks
-|-- local-domains
-|-- relay-domains
-|-- relay-recipients
-`-- transport
+/etc/postfix/
+|-- main.cf
+|-- master.cf
+|-- samples-postfixer/
+`-- postfixer.d/
+    |-- postfixer.conf
+    |-- networks
+    |-- local-domains
+    |-- relay-domains
+    |-- relay-recipients
+    `-- transport
 ```
 
-If `/etc/postfixer/postfixer.conf` is missing, the first interactive installation creates it.
+If `/etc/postfix/postfixer.d/postfixer.conf` is missing, the first interactive installation creates it.
 Non-interactive installation refuses to continue until the file exists.
 
-Trusted Postfix relay networks are managed through `POSTFIXER_NETWORKS_FILE`, which defaults to `/etc/postfixer/networks`. When that file is missing but a legacy `/etc/postfix_networks` file or symlink exists, Postfixer copies it into `/etc/postfixer/networks` during configuration. New Postfix configuration should point `mynetworks` at `/etc/postfixer/networks`, not at older environment-specific paths below `/var/tornevall`.
+Trusted Postfix relay networks are managed through `POSTFIXER_NETWORKS_FILE`, which defaults to `/etc/postfix/postfixer.d/networks`. The default contains loopback only. Add trusted application hosts and relay nodes explicitly. Existing `/etc/postfixer` data is migrated automatically on the first run.
+
+Postfix does not support a general `include main.d/*.cf` directive for arbitrary `main.cf` fragments. Postfixer therefore keeps list and map data modular through `/etc/postfix/postfixer.d` file references, while scalar `main.cf` values and `master.cf` services are applied with `postconf`. Imported fragments remain inactive until they are reviewed and connected to a specific Postfix parameter.
 
 ## Hostname and SMTP identity
 
@@ -343,7 +349,7 @@ Both roles install the SMTP policy stack:
 - OpenDKIM.
 - OpenDMARC.
 
-The exact SpamAssassin/content-filter path from the previous server configuration is still being migrated into the shared Postfix profile.
+SPF, Postgrey and OpenDKIM are wired into Postfix. The exact SpamAssassin/ClamAV/OpenDMARC content-filter path from the previous server configuration is still being migrated and is not enabled by default.
 
 ## Shared repository configuration
 
@@ -372,7 +378,7 @@ The installation order is:
 install packages if needed
     -> create /etc/postfix
     -> apply etc-postfix/
-    -> apply /etc/postfixer node settings
+    -> apply /etc/postfix/postfixer.d node settings
     -> normalize TLS/SASL/submission
     -> configure OpenDKIM
     -> rebuild maps
@@ -413,6 +419,10 @@ postfixer/
 |   `-- saslauthd-prepare.sh
 |-- etc-postfix/
 |   `-- README.md
+|-- samples-postfixer/
+|   |-- README.md
+|   |-- main.cf.example
+|   `-- master.cf.example
 `-- etc-postfixer/
     |-- postfixer.conf.example
     |-- networks.example
@@ -424,35 +434,52 @@ postfixer/
 
 ## Installation
 
+Before installation, place a valid certificate at:
+
+```text
+/etc/letsencrypt/live/MAIL-HOST/fullchain.pem
+/etc/letsencrypt/live/MAIL-HOST/privkey.pem
+```
+
+Install the recommended hybrid user server:
+
 ```bash
 git clone https://github.com/Tornevall/postfixer.git
 cd postfixer
-sudo make install
+sudo make install-server
 ```
+
+Install a relay without Courier IMAP/POP with `sudo make install-relay`. Run plain `make` to show all available targets.
 
 The first interactive installation asks for:
 
-- `inout` or `relay` role.
+- Server identity and role (`install-server` defaults to `inout`; `install-relay` defaults to `relay`).
 - SMTP/server hostname as an FQDN.
 - Default mail domain as an FQDN.
 - Optional primary outbound relay.
 - Optional fallback outbound relays.
 - Certificate domain as an FQDN.
-- Trusted relay networks/IPs to seed `/etc/postfixer/networks`.
+- Trusted relay networks/IPs to seed `/etc/postfix/postfixer.d/networks`.
+- Optional relay domains and final delivery host for the hybrid server.
+- Relay domains and their final delivery host when installing a relay.
 
 ## Make targets
 
 | Target | Function |
 | --- | --- |
-| `make install` | Install or customize the selected mail-server role. |
+| `make` | Show help without changing the system. |
+| `make install-server` | Install the hybrid Maildir/Courier user server. |
+| `make install-relay` | Install a relay without Courier IMAP/POP. |
+| `make install` | Choose the role interactively. |
 | `make apply` | Reapply repository and node configuration, rebuild maps and reload Postfix. |
 | `make maps` | Rebuild active Postfix `hash:` maps. |
 | `make aliases` | Rebuild aliases and reload Postfix. |
 | `make cert` | Apply the externally managed TLS certificate. |
 | `make check` | Validate the active role, services, TLS and submission configuration. |
+| `make status` | Show the configured role and service state. |
 | `make restart` | Restart role-specific services and run checks. |
 | `make reload` | Validate and reload Postfix. |
-| `make reset` | Back up and purge the managed mail stack after explicit confirmation. |
+| `make purge` | Back up and purge the managed mail stack after explicit confirmation. |
 
 The map builder reads the active Postfix configuration. `hash:` maps use `postmap`, aliases use `postalias`, and `regexp:` maps are not blindly hashed.
 
@@ -462,6 +489,7 @@ For both `inout` and `relay` nodes, the checks include:
 
 - `postfix check`.
 - Required services are active.
+- The `policyd-spf` service exists in `master.cf`.
 - Cyrus SASL is compiled into Postfix.
 - The saslauthd mux socket exists inside the Postfix chroot.
 - The submission service exists in `master.cf`.
@@ -488,7 +516,7 @@ testsaslauthd \
 For repeated test installs, Postfixer includes a destructive reset helper:
 
 ```bash
-POSTFIXER_RESET_CONFIRM=purge-mail-stack sudo make reset
+POSTFIXER_RESET_CONFIRM=purge-mail-stack sudo make purge
 ```
 
 The reset creates a backup below:
@@ -497,7 +525,7 @@ The reset creates a backup below:
 /root/postfixer-reset-backup-*
 ```
 
-It backs up and removes managed mail configuration and runtime state such as `/etc/postfix`, `/etc/postfixer`, `/etc/courier`, SASL/PAM mail files, Postfix runtime directories and Postfixer Courier staging trees. It purges the installed mail packages used by Postfixer.
+It backs up and removes managed mail configuration and runtime state such as `/etc/postfix`, the legacy `/etc/postfixer`, `/etc/courier`, SASL/PAM mail files, Postfix runtime directories and Postfixer Courier staging trees. It purges the installed mail packages used by Postfixer.
 
 It does not remove `/home`, externally managed `/etc/letsencrypt`, or the Git checkout such as `/root/postfixer`.
 
@@ -507,12 +535,12 @@ The old mail-server tree contains more than `main.cf` and `master.cf`.
 
 Migration should be done by function:
 
-- Node identity and primary/fallback routing -> `/etc/postfixer/postfixer.conf`.
-- Trusted relay networks -> `/etc/postfixer/networks`.
-- Final local domains -> `/etc/postfixer/local-domains`.
-- Relay domains -> `/etc/postfixer/relay-domains`.
-- Valid relay recipients -> `/etc/postfixer/relay-recipients`.
-- Domain transport routing -> `/etc/postfixer/transport`.
+- Node identity and primary/fallback routing -> `/etc/postfix/postfixer.d/postfixer.conf`.
+- Trusted relay networks -> `/etc/postfix/postfixer.d/networks`.
+- Final local domains -> `/etc/postfix/postfixer.d/local-domains`.
+- Relay domains -> `/etc/postfix/postfixer.d/relay-domains`.
+- Valid relay recipients -> `/etc/postfix/postfixer.d/relay-recipients`.
+- Domain transport routing -> `/etc/postfix/postfixer.d/transport`.
 - Generic Postfix rules -> `etc-postfix/`.
 - DKIM tables and keys -> `/etc/opendkim`, with private keys kept outside Git.
 
@@ -521,10 +549,19 @@ Remaining migration work includes the exact SpamAssassin/content-filter path, vi
 An example migration runner is available at:
 
 ```bash
-examples/migrations/import-mail01-postfix.sh
+examples/migrations/import-postfix-server.sh
 ```
 
-It defaults to `root@mail01.tornevall.net:/etc/postfix`, fetches into `/root/postfixer-migration/mail01-postfix`, and can also export only those remote passwd/shadow entries whose users have active `/home/*/Maildir/{cur,new}` messages. The account exports are written outside Git with mode `0600`.
+Set the remote source explicitly. Data is staged below `/root/postfixer-migration/postfix-import` by default. A safe migration sequence is:
+
+```bash
+sudo make import-fetch REMOTE=root@old-mail.example.com
+sudo make import-users REMOTE=root@old-mail.example.com
+sudo make import-mail REMOTE=root@old-mail.example.com
+sudo make import-config
+```
+
+The Maildir step uses resumable `rsync -aHAX --numeric-ids --partial` transfers per exported user. Configuration and mail are staged outside Git. Modular map files are installed below `/etc/postfix/postfixer.d/imports`; credentials, `main.cf`, `master.cf`, private keys and generated databases are not activated automatically.
 
 ## Related older documentation
 

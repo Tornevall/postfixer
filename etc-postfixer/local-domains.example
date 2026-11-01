@@ -1,4 +1,5 @@
 # Domains for which an inout node is the final local destination.
 # One domain per line. Do not put relay-only or backup-MX domains here.
-# Example:
-# example.com
+# The interactive user-server installer seeds this file with its mail domain.
+# Additional example:
+# example.org

@@ -1,0 +1,8 @@
+etc-postfix/**/*.db
+etc-postfix/**/*.lmdb
+etc-postfix/**/sasl_passwd
+etc-postfix/**/*.private
+etc-postfix/**/*.key
+etc-postfix/**/*.pem
+etc-postfix/**/passwd*
+etc-postfix/**/shadow*

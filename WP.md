@@ -23,7 +23,7 @@ The complete server uses Postfix for inbound and outbound SMTP, Courier for IMAP
 
 Relay helpers use the same SMTP filtering and signing stack, but they do not need Courier or local mailbox delivery. If the final server is unavailable, mail may stay in the Postfix queue until delivery is possible again. It should not disappear into a local Maildir on a relay machine.
 
-Server-specific settings also no longer belong in a shared `main.cf`. Hostname, trusted networks, relay routing and certificate identity are stored under `/etc/postfixer` and applied by the customizer.
+Server-specific settings also no longer belong in a shared `main.cf`. Hostname, trusted networks, relay routing and certificate identity are stored under `/etc/postfix/postfixer.d` and applied by the customizer.
 
 That means `relay-1` can use `relay-2` as an outbound helper without forcing a separate copy of the entire Postfix configuration for every host.
 
