@@ -358,6 +358,18 @@ EOF_RSYNC
 
     grep -Fxq alice "${staging_dir}/maildir-users.txt" || fail "alice Maildir was not discovered"
     grep -Fxq bob "${staging_dir}/maildir-users.txt" || fail "bob Maildir was not discovered"
+    grep -Fq 'alice:x:1000:1000::/home/alice:/bin/bash' "${staging_dir}/passwd.maildir-users" || \
+        fail "alice passwd entry was not staged"
+    grep -Fq 'bob:x:1000:1000::/home/bob:/bin/bash' "${staging_dir}/passwd.maildir-users" || \
+        fail "bob passwd entry was not staged"
+    grep -Fq 'alice:hash:' "${staging_dir}/shadow.maildir-users" || \
+        fail "alice shadow hash was not staged"
+    grep -Fq 'bob:hash:' "${staging_dir}/shadow.maildir-users" || \
+        fail "bob shadow hash was not staged"
+    [[ "$(stat -c '%a' "${staging_dir}/passwd.maildir-users")" == 600 ]] || \
+        fail "staged passwd entries are not mode 0600"
+    [[ "$(stat -c '%a' "${staging_dir}/shadow.maildir-users")" == 600 ]] || \
+        fail "staged shadow entries are not mode 0600"
     [[ -d "${staging_dir}/maildirs/alice/Maildir" ]] || fail "alice Maildir staging was not created"
     [[ -d "${staging_dir}/maildirs/bob/Maildir" ]] || fail "bob Maildir staging was not created"
     grep -Fq -- '-o BatchMode=yes' "$ssh_log" || fail "SSH synchronization did not use BatchMode"

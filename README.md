@@ -602,6 +602,19 @@ Run the verification as the same local account that runs the migration. When the
 
 Mailbox discovery includes every `/home/*/Maildir` directory, including empty Maildirs. If a server stores home directories elsewhere, set `REMOTE_HOME_ROOT`, for example `sudo make import-users REMOTE=root@old-mail.example.com REMOTE_HOME_ROOT=/srv/home`, and use the same value for `make import-mail`.
 
+### Password and account migration
+
+Both Courier and SMTP AUTH use PAM against the target server's local Unix accounts. `make import-users` therefore stages the matching source entries as root-only files:
+
+```text
+/root/postfixer-migration/postfix-import/passwd.maildir-users
+/root/postfixer-migration/postfix-import/shadow.maildir-users
+```
+
+A password reset is normally not required when the original shadow password hash is installed on the new account. Preserve the username, UID, primary GID, home directory and shell when creating the target account, then preserve its complete shadow entry or encrypted password hash. Keeping UID/GID values aligned also keeps the transferred Maildir ownership correct.
+
+Postfixer deliberately does not overwrite `/etc/passwd` or `/etc/shadow` automatically. Review UID/GID conflicts, required groups, locked accounts, password expiry fields and hash compatibility on the new Ubuntu release before merging account data. Hashes beginning with `!` or `*` remain locked, and old or unsupported hash formats may require a password reset. The staged shadow file is mode `0600`, remains outside Git and must be deleted securely after migration.
+
 ```bash
 sudo make import-fetch REMOTE=root@old-mail.example.com
 sudo make import-users REMOTE=root@old-mail.example.com
