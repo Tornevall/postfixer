@@ -15,6 +15,9 @@ All notable changes to Postfixer are documented in this file.
 - Corrected the migrated SpamAssassin DNS resolver profile: retired or
   timeout-prone nameservers are excluded so DKIM/SPF/DMARC checks do not
   produce false `DKIM_INVALID` results after a 15-second DNS timeout.
+- Kept the responsive site-local resolver at `62.171.175.28`, added the
+  requested `5.75.250.68` and `95.216.170.246` resolvers, and removed public
+  fallback resolvers from the personal SpamAssassin profile.
 - Clarified clean-server installation and documented how every interactive node
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,

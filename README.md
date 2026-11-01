@@ -416,7 +416,10 @@ Site-specific rules, Razor identities, Bayes databases and SQL credentials belon
 
 The configured `dns_server` entries must be actual responsive DNS resolvers,
 not ordinary application hosts. DNS timeouts can make SpamAssassin report a
-false `DKIM_INVALID` even when OpenDKIM verifies the message successfully.
+false `DKIM_INVALID` even when OpenDKIM verifies the message successfully. For
+the personal migrated profile, prefer the site's own resolvers and do not add
+public fallback resolvers such as `8.8.8.8` or `1.1.1.1` unless there is an
+explicit operational reason.
 
 ClamAV and OpenDMARC are installed, while their complete message-body integration remains separate migration work. OpenDKIM, SPF and Postgrey are already active in the SMTP path.
 
