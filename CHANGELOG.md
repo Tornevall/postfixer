@@ -12,6 +12,9 @@ All notable changes to Postfixer are documented in this file.
   the migration report documents the required repair step.
 - Documented that mailbox display names and delivery aliases do not change PAM
   login names; migrated IMAP/SMTP credentials must use the actual Unix account.
+- Corrected the migrated SpamAssassin DNS resolver profile: retired or
+  timeout-prone nameservers are excluded so DKIM/SPF/DMARC checks do not
+  produce false `DKIM_INVALID` results after a 15-second DNS timeout.
 - Clarified clean-server installation and documented how every interactive node
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,

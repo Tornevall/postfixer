@@ -414,6 +414,10 @@ The managed Postfix pipe runs `spamc` with safe fallback (`-f`). It tries the co
 
 Site-specific rules, Razor identities, Bayes databases and SQL credentials belong under `/etc/spamassassin` or another root-controlled external tree, never in Git. Installations migrated from SpamAssassin 3 must run `spamassassin --lint` on the target version: removed plugins such as Hashcash must be disabled or ported before activation. Also review every `trusted_networks`, `internal_networks` and `dns_server` entry for addresses belonging to the retired server; stale entries can cause warnings or incorrect trust decisions. `make check` runs this lint and fails when it is not clean.
 
+The configured `dns_server` entries must be actual responsive DNS resolvers,
+not ordinary application hosts. DNS timeouts can make SpamAssassin report a
+false `DKIM_INVALID` even when OpenDKIM verifies the message successfully.
+
 ClamAV and OpenDMARC are installed, while their complete message-body integration remains separate migration work. OpenDKIM, SPF and Postgrey are already active in the SMTP path.
 
 ## Shared repository configuration
