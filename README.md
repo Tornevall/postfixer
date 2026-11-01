@@ -673,6 +673,16 @@ login names: for example, a mailbox displayed as “SpamBox” may authenticate 
 the Unix user `unknown`. IMAP and SMTP AUTH must use that Unix username unless
 an explicit separate account is created.
 
+After reviewing the staged identity files, install the old password hashes for
+matching accounts with:
+
+```bash
+sudo make import-auth REMOTE=root@old-mail.example.com ACCOUNT_AUTH_CONFIRM=reviewed
+```
+
+This validates username, UID, GID and home-directory identity before installing
+each staged shadow hash. It does not create missing users or merge conflicts.
+
 ```bash
 sudo make import-fetch REMOTE=root@old-mail.example.com
 sudo make import-users REMOTE=root@old-mail.example.com

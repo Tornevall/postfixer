@@ -17,6 +17,7 @@ FETCHED_DIR="${FETCHED_DIR:-${STAGING_DIR}/fetched/etc-postfix}"
 REPORT_FILE="${REPORT_FILE:-${STAGING_DIR}/README.migration}"
 MAILDIR_STAGING_DIR="${MAILDIR_STAGING_DIR:-${STAGING_DIR}/maildirs}"
 FINAL_SYNC_CONFIRM="${FINAL_SYNC_CONFIRM:-}"
+ACCOUNT_AUTH_CONFIRM="${ACCOUNT_AUTH_CONFIRM:-}"
 POSTFIXER_IMPORT_ROOT="${POSTFIXER_IMPORT_ROOT:-/etc/postfix/postfixer.d/imports}"
 IMPORT_TARGET="${IMPORT_TARGET:-${POSTFIXER_IMPORT_ROOT}/${MIGRATION_NAME}}"
 SSH_BATCH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10)
@@ -29,6 +30,7 @@ Usage:
   examples/migrations/import-postfix-server.sh --fetch-maildir-users
   examples/migrations/import-postfix-server.sh --fetch-maildirs
   examples/migrations/import-postfix-server.sh --fetch-maildirs-final
+  examples/migrations/import-postfix-server.sh --install-account-auth
   examples/migrations/import-postfix-server.sh --diff-local
   examples/migrations/import-postfix-server.sh --install-modular
 
@@ -41,6 +43,9 @@ Actions:
   --fetch-maildirs-final
                     Make staging and target Maildirs exactly match the frozen source,
                     including deletions. Requires FINAL_SYNC_CONFIRM=source-frozen.
+  --install-account-auth
+                    Install reviewed shadow hashes for existing Maildir accounts.
+                    Requires ACCOUNT_AUTH_CONFIRM=reviewed.
   --diff-local      Diff fetched files against local /etc/postfix.
   --install-modular Install non-secret map files below /etc/postfix/postfixer.d/imports.
 
@@ -72,6 +77,8 @@ Notes:
   into /etc/postfix/postfixer.d instead of blindly kept in a shared main.cf.
 
   Shadow exports are sensitive and are intentionally written outside Git.
+  Account authentication is not changed by --fetch-maildir-users alone. Review
+  the staged files before using --install-account-auth.
 EOF_USAGE
 }
 
@@ -86,6 +93,10 @@ warn() {
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+require_root() {
+    [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Run this action as root."
 }
 
 require_fetched_tree() {
@@ -284,6 +295,31 @@ diff_local_postfix() {
     diff -ruN /etc/postfix "$FETCHED_DIR" || true
 }
 
+install_account_auth() {
+    local passwd_file="${STAGING_DIR}/passwd.maildir-users"
+    local shadow_file="${STAGING_DIR}/shadow.maildir-users"
+    local user _ uid gid _ home _ target_entry target_uid target_gid target_home hash
+
+    require_root
+    [[ "$ACCOUNT_AUTH_CONFIRM" == reviewed ]] || die \
+        "Account auth install refused. Review staged files, then set ACCOUNT_AUTH_CONFIRM=reviewed."
+    [[ -s "$passwd_file" && -s "$shadow_file" ]] || die \
+        "Missing staged account files. Run --fetch-maildir-users first."
+
+    log "Installing reviewed shadow hashes for existing Maildir accounts"
+    while IFS=: read -r user _ uid gid _ home _; do
+        [[ "$user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Unsafe user name: ${user}"
+        target_entry="$(getent passwd "$user" || true)"
+        [[ -n "$target_entry" ]] || die "Target account is missing: ${user}"
+        IFS=: read -r _ _ target_uid target_gid _ target_home _ <<< "$target_entry"
+        [[ "$uid" == "$target_uid" && "$gid" == "$target_gid" && "$home" == "$target_home" ]] || die \
+            "Target identity mismatch for ${user}; refusing to install its password hash."
+        hash="$(awk -F: -v wanted="$user" '$1 == wanted {print $2; exit}' "$shadow_file")"
+        [[ -n "$hash" ]] || die "No staged shadow hash for ${user}."
+        usermod -p "$hash" "$user"
+    done < "$passwd_file"
+}
+
 install_modular() {
     local file
     local manifest="${IMPORT_TARGET}/README.import"
@@ -353,6 +389,9 @@ main() {
             ;;
         --fetch-maildirs-final)
             fetch_maildirs yes
+            ;;
+        --install-account-auth)
+            install_account_auth
             ;;
         --diff-local)
             diff_local_postfix
