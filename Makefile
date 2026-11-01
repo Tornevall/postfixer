@@ -10,7 +10,7 @@ REMOTE ?=
 REMOTE_HOME_ROOT ?= /home
 MIGRATION_NAME ?= postfix-import
 
-.PHONY: install install-server install-relay apply maps aliases cert check status restart reload purge reset import-fetch import-users import-mail import-config test help
+.PHONY: install install-server install-relay apply maps aliases cert check status restart reload purge reset import-fetch import-users import-mail import-mail-final import-config test help
 
 install:
 	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
@@ -64,6 +64,10 @@ import-mail:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-mail REMOTE=root@mail.example.com\n' >&2; exit 64; }
 	@REMOTE="$(REMOTE)" REMOTE_HOME_ROOT="$(REMOTE_HOME_ROOT)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-maildirs
 
+import-mail-final:
+	@test -n "$(REMOTE)" || { printf 'Usage: make import-mail-final REMOTE=root@mail.example.com FINAL_SYNC_CONFIRM=source-frozen\n' >&2; exit 64; }
+	@REMOTE="$(REMOTE)" REMOTE_HOME_ROOT="$(REMOTE_HOME_ROOT)" MIGRATION_NAME="$(MIGRATION_NAME)" FINAL_SYNC_CONFIRM="$(FINAL_SYNC_CONFIRM)" bash $(IMPORTER) --fetch-maildirs-final
+
 import-config:
 	@MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --install-modular
 
@@ -87,6 +91,7 @@ help:
 		'make purge    - purge mail stack after explicit confirmation' \
 		'make import-fetch REMOTE=root@host - stage remote Postfix configuration' \
 		'make import-users REMOTE=root@host - stage Maildir account records' \
-		'make import-mail REMOTE=root@host  - rsync user Maildirs into secure staging' \
+		'make import-mail REMOTE=root@host - pre-sync Maildirs without deleting staged files' \
+		'make import-mail-final REMOTE=root@host FINAL_SYNC_CONFIRM=source-frozen - final exact sync after source shutdown' \
 		'make import-config - install safe staged map files under /etc/postfix' \
 		'make test     - run local installer profile tests'

@@ -375,7 +375,17 @@ Both roles install the SMTP policy stack:
 - OpenDKIM.
 - OpenDMARC.
 
-SPF, Postgrey and OpenDKIM are wired into Postfix. The exact SpamAssassin/ClamAV/OpenDMARC content-filter path from the previous server configuration is still being migrated and is not enabled by default.
+SPF, Postgrey and OpenDKIM are wired into Postfix. SpamAssassin is also wired into Postfix by default through a managed `spamassassin` pipe service. `spamd` runs locally on `127.0.0.1:783`, so filtering does not require an external SpamAssassin host. Both inbound SMTP and authenticated submission are filtered.
+
+The node setting `POSTFIXER_SPAMD_HOSTS` defaults to `127.0.0.1`. Optional failover hosts can follow as a comma-separated list, for example:
+
+```bash
+POSTFIXER_SPAMD_HOSTS=127.0.0.1,spamd-backup.example.com
+```
+
+Site-specific rules, Razor identities, Bayes databases and SQL credentials belong under `/etc/spamassassin` or another root-controlled external tree, never in Git. Installations migrated from SpamAssassin 3 must run `spamassassin --lint` on the target version: removed plugins such as Hashcash must be disabled or ported before activation.
+
+ClamAV and OpenDMARC are installed, while their complete message-body integration remains separate migration work. OpenDKIM, SPF and Postgrey are already active in the SMTP path.
 
 ## Shared repository configuration
 
@@ -609,12 +619,15 @@ Both Courier and SMTP AUTH use PAM against the target server's local Unix accoun
 ```text
 /root/postfixer-migration/postfix-import/passwd.maildir-users
 /root/postfixer-migration/postfix-import/shadow.maildir-users
+/root/postfixer-migration/postfix-import/group.maildir-users
 /root/postfixer-migration/postfix-import/maildir-paths.tsv
 ```
 
 A password reset is normally not required when the original shadow password hash is installed on the new account. Preserve the username, UID, primary GID, home directory and shell when creating the target account, then preserve its complete shadow entry or encrypted password hash. Keeping UID/GID values aligned also keeps the transferred Maildir ownership correct.
 
-Postfixer deliberately does not overwrite `/etc/passwd` or `/etc/shadow` automatically. Review UID/GID conflicts, required groups, locked accounts, password expiry fields and hash compatibility on the new Ubuntu release before merging account data. Hashes beginning with `!` or `*` remain locked, and old or unsupported hash formats may require a password reset. The staged shadow file is mode `0600`, remains outside Git and must be deleted securely after migration.
+Postfixer also exports the primary group records required by those GIDs. It does not copy supplementary group memberships, which avoids silently carrying old administrative privileges such as `sudo` to the new server. Add any genuinely required supplementary memberships only after review.
+
+Postfixer deliberately does not overwrite `/etc/passwd`, `/etc/group` or `/etc/shadow` automatically. Review UID/GID conflicts, required groups, locked accounts, password expiry fields and hash compatibility on the new Ubuntu release before merging account data. Hashes beginning with `!` or `*` remain locked, and old or unsupported hash formats may require a password reset. The staged account files are mode `0600`, remain outside Git and must be deleted securely after migration.
 
 ```bash
 sudo make import-fetch REMOTE=root@old-mail.example.com
@@ -623,7 +636,33 @@ sudo make import-mail REMOTE=root@old-mail.example.com
 sudo make import-config
 ```
 
-The Maildir step uses resumable `rsync -aHAX --numeric-ids --partial` transfers over the same passwordless SSH session for each exported user. Configuration and mail are staged outside Git. Modular map files are installed below `/etc/postfix/postfixer.d/imports`; credentials, `main.cf`, `master.cf`, private keys and generated databases are not activated automatically.
+The normal Maildir step is a read-only pre-sync from the old server and uses resumable `rsync -aHAX --numeric-ids --partial` transfers over the same passwordless SSH session for each exported user. It does not delete files from staging, and the old server may remain live while this first large copy runs. Configuration and mail are staged outside Git. Modular map files are installed below `/etc/postfix/postfixer.d/imports`; credentials, `main.cf`, `master.cf`, private keys and generated databases are not activated automatically.
+
+### Final cutover without lost mail
+
+Do not perform the final account and Maildir import while the old server can still accept delivery or mailbox changes. Complete the installation and pre-sync first. During the short cutover window:
+
+1. Stop Postfix and every Courier IMAP/POP service on the old server.
+2. Verify that the old services are inactive and ports 25, 110, 143, 465, 587, 993 and 995 no longer accept connections.
+3. Run the confirmed final Maildir sync. This adds `rsync --delete`, so staging becomes an exact copy of the frozen source.
+4. Import the reviewed accounts and staged Maildirs on the new server, then validate ownership, authentication, SMTP, IMAP and POP.
+5. Change MX only after the new server passes validation. Remote senders should retry while the old primary is stopped; also verify how any secondary MX queues and forwards mail.
+
+Example source freeze and final sync:
+
+```bash
+# On the old server. Adjust Courier unit names if that installation differs.
+sudo systemctl stop postfix courier-imap courier-imap-ssl courier-pop courier-pop-ssl
+sudo systemctl is-active postfix courier-imap courier-imap-ssl courier-pop courier-pop-ssl
+
+# On the new server, only after the old services have been verified inactive.
+sudo make import-mail-final \
+  REMOTE=root@old-mail.example.com \
+  MIGRATION_NAME=postfix-import \
+  FINAL_SYNC_CONFIRM=source-frozen
+```
+
+`import-mail-final` refuses to run without the exact confirmation value. Do not restart mail services on the old server after this point unless the migration is deliberately rolled back. MX is a separate, final operation and is never changed by the importer.
 
 ## Related older documentation
 

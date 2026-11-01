@@ -12,6 +12,7 @@ POSTFIXER_CONFIG="${POSTFIXER_CONFIG:-${POSTFIXER_ETC}/postfixer.conf}"
 POSTFIXER_CONFIG_SOURCE="${POSTFIXER_CONFIG_SOURCE:-${ROOT_DIR}/etc-postfixer}"
 POSTFIXER_SAMPLES_DIR="${POSTFIXER_SAMPLES_DIR:-}"
 POSTFIXER_LEGACY_ETC="${POSTFIXER_LEGACY_ETC:-/etc/postfixer}"
+SPAMASSASSIN_DEFAULTS="${SPAMASSASSIN_DEFAULTS:-/etc/default/spamassassin}"
 
 # Preserve shared implementations before overriding them.
 eval "$(declare -f install_courier_from_archive | sed '1s/install_courier_from_archive/postfixer_common_install_courier_from_archive/')"
@@ -155,6 +156,7 @@ EOF_INTRO
         config_write POSTFIXER_RELAY_RECIPIENTS_FILE "${POSTFIXER_ETC}/relay-recipients"
         config_write POSTFIXER_TRANSPORT_FILE "${POSTFIXER_ETC}/transport"
         config_write POSTFIXER_DKIM_DIR "/etc/opendkim"
+        config_write POSTFIXER_SPAMD_HOSTS "127.0.0.1"
     } > "$POSTFIXER_CONFIG"
 
     chmod 0644 "$POSTFIXER_CONFIG"
@@ -283,6 +285,7 @@ load_postfixer_config() {
     POSTFIXER_RELAY_RECIPIENTS_FILE="${POSTFIXER_RELAY_RECIPIENTS_FILE:-${POSTFIXER_ETC}/relay-recipients}"
     POSTFIXER_TRANSPORT_FILE="${POSTFIXER_TRANSPORT_FILE:-${POSTFIXER_ETC}/transport}"
     POSTFIXER_DKIM_DIR="${POSTFIXER_DKIM_DIR:-/etc/opendkim}"
+    POSTFIXER_SPAMD_HOSTS="${POSTFIXER_SPAMD_HOSTS:-127.0.0.1}"
 
     case "$POSTFIXER_ROLE" in
         inout|relay) ;;
@@ -295,6 +298,8 @@ load_postfixer_config() {
         die "POSTFIXER_MAIL_DOMAIN must be a fully qualified domain name. Run the installer interactively or edit ${POSTFIXER_CONFIG}."
     is_fqdn "$POSTFIXER_CERT_DOMAIN" || \
         die "POSTFIXER_CERT_DOMAIN must be a fully qualified domain name. Run the installer interactively or edit ${POSTFIXER_CONFIG}."
+    [[ "$POSTFIXER_SPAMD_HOSTS" =~ ^[A-Za-z0-9._:-]+(,[A-Za-z0-9._:-]+)*$ ]] || \
+        die "POSTFIXER_SPAMD_HOSTS must be a comma-separated list of hostnames or IP addresses without spaces."
 
     install_networks_file
     install_postfixer_data_file "$POSTFIXER_LOCAL_DOMAINS_FILE" local-domains.example
@@ -355,6 +360,19 @@ postconf_set() {
     postconf -e "${key} = ${value}"
 }
 
+configure_spamassassin_node() {
+    log "Configuring local SpamAssassin with spamd hosts: ${POSTFIXER_SPAMD_HOSTS}"
+
+    install -d -m 0755 "$(dirname "$SPAMASSASSIN_DEFAULTS")"
+    touch "$SPAMASSASSIN_DEFAULTS"
+    set_equals_value "$SPAMASSASSIN_DEFAULTS" ENABLED 1
+    set_equals_value "$SPAMASSASSIN_DEFAULTS" OPTIONS '"--create-prefs --max-children 5 --helper-home-dir -i 127.0.0.1"'
+    set_equals_value "$SPAMASSASSIN_DEFAULTS" CRON 1
+
+    postconf -M "spamassassin/unix=spamassassin unix - n n - - pipe flags=Rq user=debian-spamd argv=/usr/bin/spamc -f -n 10 -t 120 -d ${POSTFIXER_SPAMD_HOSTS} -e /usr/sbin/sendmail -oi -f \${sender} \${recipient}"
+    postconf -P 'smtp/inet/content_filter=spamassassin'
+}
+
 configure_postfix_node() {
     local relay_recipients=""
 
@@ -382,6 +400,7 @@ configure_postfix_node() {
     postconf_set smtp_tls_security_level may
     postconf_set smtpd_tls_security_level may
     postconf_set policyd-spf_time_limit 3600
+    configure_spamassassin_node
 
     if [[ -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem" && -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/privkey.pem" ]]; then
         postconf_set smtpd_tls_cert_file "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/fullchain.pem"
@@ -552,7 +571,7 @@ enable_and_restart_services() {
 
 check_mail_stack() {
     local failed=0 service
-    local services=(postfix postgrey opendkim opendmarc)
+    local services=(postfix postgrey opendkim opendmarc spamassassin)
 
     load_postfixer_config
     log "Checking ${POSTFIXER_ROLE} mail stack"
@@ -562,6 +581,16 @@ check_mail_stack() {
 
     if ! postconf -M policyd-spf/unix >/dev/null 2>&1; then
         warn "Postfix policyd-spf service is missing from master.cf."
+        failed=1
+    fi
+
+    if ! postconf -M spamassassin/unix >/dev/null 2>&1; then
+        warn "Postfix SpamAssassin pipe service is missing from master.cf."
+        failed=1
+    fi
+
+    if ! spamassassin --lint; then
+        warn "SpamAssassin configuration lint failed."
         failed=1
     fi
 
@@ -583,6 +612,11 @@ check_mail_stack() {
     done
 
     if command -v ss >/dev/null 2>&1; then
+        if systemctl is-active --quiet spamassassin.service 2>/dev/null && \
+            ! ss -ltn 2>/dev/null | awk '$4 ~ /127\.0\.0\.1:783$/ {found=1} END {exit !found}'; then
+            warn "SpamAssassin is active but spamd is not listening on 127.0.0.1:783."
+            failed=1
+        fi
         printf '\nListening mail ports:\n'
         ss -ltnp 2>/dev/null | awk 'NR == 1 || $4 ~ /:(25|110|143|465|587|993|995)$/' || true
     fi

@@ -28,3 +28,7 @@ POSTFIXER_RELAY_DOMAINS_FILE=/etc/postfix/postfixer.d/relay-domains
 POSTFIXER_RELAY_RECIPIENTS_FILE=/etc/postfix/postfixer.d/relay-recipients
 POSTFIXER_TRANSPORT_FILE=/etc/postfix/postfixer.d/transport
 POSTFIXER_DKIM_DIR=/etc/opendkim
+
+# Local spamd is always installed and should be first. Optional failover hosts
+# may follow as a comma-separated list, for example 127.0.0.1,spamd-backup.example.com.
+POSTFIXER_SPAMD_HOSTS=127.0.0.1

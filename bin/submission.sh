@@ -82,6 +82,7 @@ configure_submission_service() {
     postconf -P 'submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject'
     postconf -P 'submission/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject'
     postconf -P 'submission/inet/milter_macro_daemon_name=ORIGINATING'
+    postconf -P 'submission/inet/content_filter=spamassassin'
 }
 
 configure_postfix_node() {
@@ -156,6 +157,12 @@ check_submission_configuration() {
             failed=1
         fi
     done
+
+    value="$(postconf -P 'submission/inet/content_filter' 2>/dev/null | sed -E 's/^[^=]+=[[:space:]]*//' || true)"
+    if [[ "$value" != spamassassin ]]; then
+        warn "Submission SpamAssassin content filter is missing (active value: ${value:-missing})."
+        failed=1
+    fi
 
     if ! postconf -a 2>/dev/null | grep -qx cyrus; then
         warn "Postfix does not report Cyrus SASL server support."

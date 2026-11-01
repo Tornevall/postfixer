@@ -15,6 +15,7 @@ STAGING_DIR="${STAGING_DIR:-${STAGING_ROOT}/${MIGRATION_NAME}}"
 FETCHED_DIR="${FETCHED_DIR:-${STAGING_DIR}/fetched/etc-postfix}"
 REPORT_FILE="${REPORT_FILE:-${STAGING_DIR}/README.migration}"
 MAILDIR_STAGING_DIR="${MAILDIR_STAGING_DIR:-${STAGING_DIR}/maildirs}"
+FINAL_SYNC_CONFIRM="${FINAL_SYNC_CONFIRM:-}"
 POSTFIXER_IMPORT_ROOT="${POSTFIXER_IMPORT_ROOT:-/etc/postfix/postfixer.d/imports}"
 IMPORT_TARGET="${IMPORT_TARGET:-${POSTFIXER_IMPORT_ROOT}/${MIGRATION_NAME}}"
 SSH_BATCH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10)
@@ -26,6 +27,7 @@ Usage:
   examples/migrations/import-postfix-server.sh --fetch
   examples/migrations/import-postfix-server.sh --fetch-maildir-users
   examples/migrations/import-postfix-server.sh --fetch-maildirs
+  examples/migrations/import-postfix-server.sh --fetch-maildirs-final
   examples/migrations/import-postfix-server.sh --diff-local
   examples/migrations/import-postfix-server.sh --install-modular
 
@@ -34,7 +36,10 @@ Actions:
   --fetch-maildir-users
                     Find every remote REMOTE_HOME_ROOT/*/Maildir and export only
                     matching passwd/shadow entries into staging, mode 0600.
-  --fetch-maildirs   Rsync Maildir data for the exported users into root-only staging.
+  --fetch-maildirs   Pre-sync Maildirs into root-only staging without deleting files.
+  --fetch-maildirs-final
+                    Make staging exactly match the frozen source, including deletions.
+                    Requires FINAL_SYNC_CONFIRM=source-frozen.
   --diff-local      Diff fetched files against local /etc/postfix.
   --install-modular Install non-secret map files below /etc/postfix/postfixer.d/imports.
 
@@ -51,6 +56,8 @@ Examples:
   REMOTE=root@old-mail.example.com ./examples/migrations/import-postfix-server.sh --fetch
   REMOTE=root@old-mail.example.com ./examples/migrations/import-postfix-server.sh --fetch-maildir-users
   REMOTE=root@old-mail.example.com ./examples/migrations/import-postfix-server.sh --fetch-maildirs
+  FINAL_SYNC_CONFIRM=source-frozen REMOTE=root@old-mail.example.com \
+    ./examples/migrations/import-postfix-server.sh --fetch-maildirs-final
   ./examples/migrations/import-postfix-server.sh --diff-local
   sudo ./examples/migrations/import-postfix-server.sh --install-modular
 
@@ -141,6 +148,7 @@ fetch_maildir_users() {
     local paths_file="${STAGING_DIR}/maildir-paths.tsv"
     local passwd_file="${STAGING_DIR}/passwd.maildir-users"
     local shadow_file="${STAGING_DIR}/shadow.maildir-users"
+    local group_file="${STAGING_DIR}/group.maildir-users"
     local report_file="${STAGING_DIR}/maildir-users.report"
 
     require_remote
@@ -183,15 +191,23 @@ fetch_maildir_users() {
         rm -f "$tmp"
     ' < "$users_file" > "$shadow_file"
 
-    chmod 0600 "$users_file" "$paths_file" "$passwd_file" "$shadow_file"
+    cut -d: -f4 "$passwd_file" | sort -nu |
+        ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" 'set -e
+            while IFS= read -r gid; do
+                getent group "$gid" || true
+            done
+        ' > "$group_file"
+
+    chmod 0600 "$users_file" "$paths_file" "$passwd_file" "$shadow_file" "$group_file"
 
     {
         printf 'Maildir user export from %s\n\n' "$REMOTE"
         printf 'Passwd-backed users with %s/*/Maildir: %s\n' "$REMOTE_HOME_ROOT" "$(wc -l < "$users_file")"
         printf 'passwd entries exported: %s\n' "$(wc -l < "$passwd_file")"
         printf 'shadow entries exported: %s\n' "$(wc -l < "$shadow_file")"
+        printf 'primary group entries exported: %s\n' "$(wc -l < "$group_file")"
         printf '\nFiles:\n'
-        printf '  %s\n' "$users_file" "$paths_file" "$passwd_file" "$shadow_file"
+        printf '  %s\n' "$users_file" "$paths_file" "$passwd_file" "$shadow_file" "$group_file"
         printf '\nThese files contain account and password-hash material. Keep them outside Git.\n'
     } > "$report_file"
     chmod 0600 "$report_file"
@@ -200,8 +216,17 @@ fetch_maildir_users() {
 }
 
 fetch_maildirs() {
+    local delete_mode="${1:-no}"
     local paths_file="${STAGING_DIR}/maildir-paths.tsv"
     local user remote_maildir target
+    local rsync_delete=()
+
+    if [[ "$delete_mode" == yes ]]; then
+        [[ "$FINAL_SYNC_CONFIRM" == source-frozen ]] || die \
+            "Final Maildir sync refused. Stop mail services on the source, verify they are inactive, then set FINAL_SYNC_CONFIRM=source-frozen."
+        rsync_delete=(--delete)
+        log "Final exact Maildir sync confirmed for frozen source ${REMOTE}"
+    fi
 
     require_remote
     [[ -s "$paths_file" ]] || die "Missing ${paths_file}. Run --fetch-maildir-users first."
@@ -216,7 +241,7 @@ fetch_maildirs() {
         target="${MAILDIR_STAGING_DIR}/${user}/Maildir"
         install -d -m 0700 "$target"
         log "Fetching ${remote_maildir} for ${user} from ${REMOTE}"
-        rsync -aHAX --numeric-ids --partial --info=progress2,stats2 \
+        rsync -aHAX --numeric-ids --partial --info=progress2,stats2 "${rsync_delete[@]}" \
             -e "$RSYNC_SSH_COMMAND" \
             "${REMOTE}:${remote_maildir}/" \
             "${target}/"
@@ -296,7 +321,10 @@ main() {
             fetch_maildir_users
             ;;
         --fetch-maildirs)
-            fetch_maildirs
+            fetch_maildirs no
+            ;;
+        --fetch-maildirs-final)
+            fetch_maildirs yes
             ;;
         --diff-local)
             diff_local_postfix

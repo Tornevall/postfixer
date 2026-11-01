@@ -55,6 +55,7 @@ POSTFIXER_RELAY_DOMAINS_FILE=${config_dir}/relay-domains
 POSTFIXER_RELAY_RECIPIENTS_FILE=${config_dir}/relay-recipients
 POSTFIXER_TRANSPORT_FILE=${config_dir}/transport
 POSTFIXER_DKIM_DIR=${config_dir}/opendkim
+POSTFIXER_SPAMD_HOSTS=127.0.0.1
 EOF_CONFIG
 
     cat > "${config_dir}/networks" <<'EOF_NETWORKS'
@@ -93,6 +94,7 @@ run_profile_install() {
 
         export POSTFIXER_ETC="$config_dir"
         export POSTFIXER_CONFIG="${config_dir}/postfixer.conf"
+        export SPAMASSASSIN_DEFAULTS="${run_dir}/spamassassin.defaults"
         export TEST_COMMAND_LOG="$log_file"
 
         require_root() { :; }
@@ -151,6 +153,12 @@ run_profile_install() {
     assert_log_contains "$log_file" "postconf -e relay_domains = ${config_dir}/relay-domains"
     assert_log_contains "$log_file" "postconf -e transport_maps = hash:${config_dir}/transport"
     assert_log_contains "$log_file" "postconf -M policyd-spf/unix=policyd-spf unix - n n - 0 spawn user=policyd-spf argv=/usr/bin/policyd-spf"
+    assert_log_contains "$log_file" 'postconf -M spamassassin/unix=spamassassin unix - n n - - pipe flags=Rq user=debian-spamd argv=/usr/bin/spamc -f -n 10 -t 120 -d 127.0.0.1 -e /usr/sbin/sendmail -oi -f ${sender} ${recipient}'
+    assert_log_contains "$log_file" "postconf -P smtp/inet/content_filter=spamassassin"
+    assert_log_contains "$log_file" "postconf -P submission/inet/content_filter=spamassassin"
+    grep -Fqx 'ENABLED=1' "${run_dir}/spamassassin.defaults" || fail "spamd was not enabled"
+    grep -Fqx 'OPTIONS="--create-prefs --max-children 5 --helper-home-dir -i 127.0.0.1"' "${run_dir}/spamassassin.defaults" || \
+        fail "spamd was not restricted to loopback"
 
     if [[ "$role" == inout ]]; then
         assert_log_contains "$log_file" "configure_courier inout"
@@ -340,6 +348,11 @@ case "$*" in
             printf '%s:hash:1:0:99999:7:::\n' "$user"
         done
         ;;
+    *'getent group'*)
+        while IFS= read -r gid; do
+            printf 'mail%s:x:%s:\n' "$gid" "$gid"
+        done
+        ;;
 esac
 EOF_SSH
 
@@ -360,6 +373,19 @@ EOF_RSYNC
         bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildirs \
         >/dev/null
 
+    if PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
+        REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
+        bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildirs-final \
+        >/dev/null 2>&1; then
+        fail "final Maildir synchronization ran without source-frozen confirmation"
+    fi
+
+    PATH="${mock_dir}:${PATH}" SSH_LOG="$ssh_log" RSYNC_LOG="$rsync_log" \
+    REMOTE=root@mail-old.example.com STAGING_DIR="$staging_dir" \
+    FINAL_SYNC_CONFIRM=source-frozen \
+        bash "${ROOT_DIR}/examples/migrations/import-postfix-server.sh" --fetch-maildirs-final \
+        >/dev/null
+
     grep -Fxq alice "${staging_dir}/maildir-users.txt" || fail "alice Maildir was not discovered"
     grep -Fxq testmailserver "${staging_dir}/maildir-users.txt" || \
         fail "account with a differently named home directory was not discovered"
@@ -371,10 +397,14 @@ EOF_RSYNC
         fail "alice shadow hash was not staged"
     grep -Fq 'testmailserver:hash:' "${staging_dir}/shadow.maildir-users" || \
         fail "testmailserver shadow hash was not staged"
+    grep -Fq 'mail1000:x:1000:' "${staging_dir}/group.maildir-users" || \
+        fail "primary group entry was not staged"
     [[ "$(stat -c '%a' "${staging_dir}/passwd.maildir-users")" == 600 ]] || \
         fail "staged passwd entries are not mode 0600"
     [[ "$(stat -c '%a' "${staging_dir}/shadow.maildir-users")" == 600 ]] || \
         fail "staged shadow entries are not mode 0600"
+    [[ "$(stat -c '%a' "${staging_dir}/group.maildir-users")" == 600 ]] || \
+        fail "staged group entries are not mode 0600"
     [[ -d "${staging_dir}/maildirs/alice/Maildir" ]] || fail "alice Maildir staging was not created"
     [[ -d "${staging_dir}/maildirs/testmailserver/Maildir" ]] || \
         fail "testmailserver Maildir staging was not created"
@@ -385,6 +415,8 @@ EOF_RSYNC
         fail "rsync did not fetch alice from /home"
     grep -Fq 'root@mail-old.example.com:/home/testmail/Maildir/' "$rsync_log" || \
         fail "rsync did not use the passwd-backed home path for testmailserver"
+    [[ "$(grep -Fc -- '--delete' "$rsync_log")" == 2 ]] || \
+        fail "only confirmed final Maildir synchronization should use --delete"
 }
 
 run_profile_install inout

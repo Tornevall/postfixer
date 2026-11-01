@@ -164,7 +164,8 @@ install_base_stack() {
         ca-certificates openssl openssh-client rsync make iproute2 \
         postfix postfix-pcre postfix-policyd-spf-python postgrey \
         sasl2-bin libsasl2-2 libsasl2-modules \
-        spamassassin spamc \
+        spamassassin spamc razor pyzor \
+        libdbi-perl libdbd-mysql-perl libmail-spf-perl \
         clamav clamav-daemon clamav-freshclam clamdscan \
         fetchmail procmail \
         opendkim opendkim-tools opendmarc \

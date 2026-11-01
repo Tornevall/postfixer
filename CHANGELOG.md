@@ -10,6 +10,8 @@ All notable changes to Postfixer are documented in this file.
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,
   UID/GID ownership requirements and the cases that still require a reset.
+- Exported the primary group records required by migrated mailbox GIDs while
+  deliberately excluding unreviewed supplementary and administrative groups.
 - Fixed Maildir account discovery to match each directory against the account's
   `passwd` home field instead of assuming the directory basename is the username.
 - Documented that Postfixer originated as a personal migration tool for an
@@ -23,6 +25,17 @@ All notable changes to Postfixer are documented in this file.
   and the remote permissions required by account and Maildir migration.
 - Changed mailbox discovery to include every `/home/*/Maildir`, including empty
   Maildirs, with an optional `REMOTE_HOME_ROOT` override for other layouts.
+- Split Maildir transfer into a non-destructive pre-sync and an explicitly
+  confirmed final sync. The final action refuses to run unless the source is
+  declared frozen, then uses `rsync --delete` for an exact staged copy.
+- Documented the source-service shutdown, port verification, final delta sync,
+  target validation and last-step MX cutover sequence to avoid lost mail.
+- Enabled a local loopback-only `spamd` and managed Postfix SpamAssassin pipe
+  for inbound SMTP and authenticated submission on every installation.
+- Added optional per-node SpamAssassin failover hosts while keeping local
+  filtering as the default with no external spamd dependency.
+- Added Razor, Pyzor, SPF and SQL Perl dependencies needed by migrated custom
+  SpamAssassin profiles, plus lint and listener health checks.
 
 ## 2026-11-01 - Initial working release candidate
 
