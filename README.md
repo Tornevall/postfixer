@@ -385,6 +385,8 @@ The node setting `POSTFIXER_SPAMD_HOSTS` defaults to `127.0.0.1`. Optional failo
 POSTFIXER_SPAMD_HOSTS=127.0.0.1,spamd-backup.example.com
 ```
 
+The managed Postfix pipe runs `spamc` with safe fallback (`-f`). It tries the configured hosts and, if no `spamd` can filter the message, returns the original message for normal delivery instead of rejecting or losing it. If the pipe process or Postfix reinjection itself fails, Postfix defers the message in its queue for retry. Filtering failure therefore does not intentionally block mail, but monitoring should alert because messages may pass through unfiltered.
+
 Site-specific rules, Razor identities, Bayes databases and SQL credentials belong under `/etc/spamassassin` or another root-controlled external tree, never in Git. Installations migrated from SpamAssassin 3 must run `spamassassin --lint` on the target version: removed plugins such as Hashcash must be disabled or ported before activation.
 
 ClamAV and OpenDMARC are installed, while their complete message-body integration remains separate migration work. OpenDKIM, SPF and Postgrey are already active in the SMTP path.
@@ -667,6 +669,136 @@ sudo make import-mail-final \
 ```
 
 `import-mail-final` refuses to run without the exact confirmation value. Do not restart mail services on the old server after this point unless the migration is deliberately rolled back. MX is a separate, final operation and is never changed by the importer.
+
+### Production migration runbook
+
+This is the complete recommended sequence for replacing an existing mailbox server. Commands use `old-mail.example.com` and `mail-new.example.com` as placeholders. Keep the old server authoritative until the explicit freeze step.
+
+#### Phase 1: prepare the target without changing MX
+
+1. Create and verify the target A, AAAA and matching PTR records. Do not change MX yet.
+2. Install a certificate that covers the final SMTP/IMAP hostname.
+3. Clone Postfixer on the target and install the hybrid profile:
+
+   ```bash
+   sudo make install-server
+   ```
+
+4. Review `/etc/postfix/postfixer.d/postfixer.conf`, local domains, relay domains, relay recipients, transports, trusted networks and DKIM material.
+5. Apply and verify the base server:
+
+   ```bash
+   sudo make apply
+   sudo make restart
+   sudo make check
+   ```
+
+6. If custom SpamAssassin rules, SQL preferences, Bayes storage, Razor or Pyzor are used, keep credentials and identities outside Git, link or copy them below `/etc/spamassassin`, and require a clean target-version lint:
+
+   ```bash
+   sudo spamassassin --lint
+   printf 'From: test@example.net\nTo: test@example.net\nSubject: SA test\n\nTest.\n' |
+     sudo spamc -c -d 127.0.0.1
+   ```
+
+7. Test SMTP, STARTTLS, AUTH, IMAP/POP and certificates directly against the target address or a temporary hosts-file entry. The production MX still points to the old server.
+
+#### Phase 2: inventory and pre-sync while the source remains live
+
+1. Configure passwordless root SSH or equivalent read access and verify `BatchMode=yes`.
+2. Stage configuration, filtered account records and Maildirs outside Git:
+
+   ```bash
+   sudo make import-fetch \
+     REMOTE=root@old-mail.example.com \
+     MIGRATION_NAME=production-mail
+
+   sudo make import-users \
+     REMOTE=root@old-mail.example.com \
+     MIGRATION_NAME=production-mail
+
+   sudo make import-mail \
+     REMOTE=root@old-mail.example.com \
+     MIGRATION_NAME=production-mail
+   ```
+
+3. Review `passwd.maildir-users`, `shadow.maildir-users`, `group.maildir-users` and `maildir-paths.tsv` as root. Confirm that every imported account owns a real Maildir and that no unrelated system account is included.
+4. Check every username, UID, primary GID and home path against `getent passwd` and `getent group` on the target. Resolve every collision before creating accounts.
+5. Back up `/etc/passwd`, `/etc/group`, `/etc/shadow` and `/etc/gshadow`. Create missing primary groups and users with the staged numeric IDs, homes and shells. Install the staged encrypted password hashes without putting plaintext passwords on a command line. Preserve compatible shadow aging fields where required.
+6. Do not overwrite an existing administrative account blindly. If an existing target account already has the same UID/GID/home but a different password hash, explicitly choose which password must remain valid.
+7. Pre-copy staged Maildirs into their final target homes with numeric ownership preserved. Do not use `--delete` against final homes while the source remains live. Users and delivery must still use the old server at this stage.
+8. Repeat `make import-mail` as needed; it is resumable and copies only deltas. Confirm adequate free space for both secure staging and final `/home` data.
+
+#### Phase 3: freeze the old server
+
+Schedule a short maintenance window. Immediately before the freeze, confirm that the target server, account plan, DNS records, certificate, filters and rollback backup are ready.
+
+1. Stop Postfix and all Courier IMAP/POP services on the old server:
+
+   ```bash
+   sudo systemctl stop postfix courier-imap courier-imap-ssl courier-pop courier-pop-ssl
+   ```
+
+2. Verify that the source is inactive and no longer accepts mailbox changes:
+
+   ```bash
+   sudo systemctl is-active postfix courier-imap courier-imap-ssl courier-pop courier-pop-ssl
+   sudo ss -lntp | grep -E ':(25|110|143|465|587|993|995)( |$)' || true
+   ```
+
+3. Also verify externally that the old address no longer accepts those ports. Remote SMTP senders should retry; understand how every secondary MX queues mail during the window.
+4. Do not restart the old mail services unless deliberately rolling back.
+
+#### Phase 4: final exact import
+
+1. Refresh the frozen account export one last time:
+
+   ```bash
+   sudo make import-users \
+     REMOTE=root@old-mail.example.com \
+     MIGRATION_NAME=production-mail
+   ```
+
+2. Run the guarded final Maildir delta. This is the only source-sync action that uses `rsync --delete`:
+
+   ```bash
+   sudo make import-mail-final \
+     REMOTE=root@old-mail.example.com \
+     MIGRATION_NAME=production-mail \
+     FINAL_SYNC_CONFIRM=source-frozen
+   ```
+
+3. Apply any final account changes, encrypted hashes and shadow aging fields.
+4. Copy the exact staged Maildirs into the corresponding target home directories with `rsync -aHAX --numeric-ids --delete`. Use `maildir-paths.tsv` and the staged passwd home field rather than assuming the username equals the home-directory basename.
+5. Verify account count, Maildir count, file count, numeric ownership, home permissions and available disk space.
+
+#### Phase 5: validate before changing MX
+
+1. Run:
+
+   ```bash
+   sudo make check
+   sudo postqueue -p
+   sudo spamassassin --lint
+   ```
+
+2. Test a migrated login through SMTP AUTH and IMAP/POP without exposing the password in process arguments or logs.
+3. Deliver test messages through port 25 and submission, confirm Maildir delivery, SpamAssassin headers, DKIM signing/verification and outbound routing.
+4. Confirm that local `spamd` is primary, any remote `spamd` is only failover, and mail still passes unfiltered if every `spamd` is intentionally stopped for the test.
+5. Confirm the final hostname, forward DNS, reverse DNS, SMTP banner and certificate names.
+
+#### Phase 6: change MX last
+
+1. Change MX only after all target checks pass. The importer never changes DNS.
+2. Monitor authoritative DNS, target Postfix logs, queue depth, rejections, authentication, Courier and filtering.
+3. Keep the old server frozen and intact during the rollback window. Drain or trigger any secondary-MX queue after the new primary is reachable.
+
+#### Rollback and cleanup
+
+- Before the new server has accepted mail, rollback can restart the old services and leave MX unchanged or restore the previous MX.
+- After the new server has accepted mail, do not simply restart the old server. Freeze the new server first and reconcile its newly delivered mail back to the old server, otherwise the rollback loses messages.
+- Keep `/root/postfixer-backup-*` and `/root/postfixer-migration/<name>` until account, mail, authentication, queue and DNS validation are complete.
+- Staging contains password hashes, legacy configuration and possibly credentials. Remove it securely after the retention window, and rotate any credential that was exposed during migration or stored in old configuration.
 
 ## Related older documentation
 
