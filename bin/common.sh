@@ -695,9 +695,13 @@ maintenance_action() {
         apply)
             [[ -d /etc/postfix ]] || die "Postfix is not installed. Run make install first."
             backup_existing_configuration
+            load_postfixer_config
+            link_tornevall_opendkim_tree
+            configure_opendkim_node
             apply_postfix_configuration
             rebuild_postfix_maps
             postfix check
+            systemctl restart opendkim.service
             systemctl reload postfix.service
             ;;
         maps)

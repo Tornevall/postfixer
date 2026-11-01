@@ -46,6 +46,8 @@ All notable changes to Postfixer are documented in this file.
   target `/home` directory and apply the target user's ownership.
 - Documented the completed `inbound-1` to `inbound.tornevall.net` migration,
   queue handling, verification results and MX/PTR cutover.
+- Added an explicit opt-in Tornevall OpenDKIM tree link for the personal
+  migration profile without changing generic installations.
 
 ## 2026-11-01 - Initial working release candidate
 

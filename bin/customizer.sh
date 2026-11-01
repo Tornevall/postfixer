@@ -461,6 +461,27 @@ set_opendkim_directive() {
     fi
 }
 
+link_tornevall_opendkim_tree() {
+    local source backup
+
+    [[ "${POSTFIXER_USE_TORNEVALL_OPENDKIM:-no}" == yes ]] || return 0
+    source="${POSTFIXER_TORNEVALL_OPENDKIM_DIR:-/var/tornevall/system/etc/opendkim}"
+    [[ -d "$source" ]] || die "Tornevall OpenDKIM directory is missing: ${source}"
+
+    if [[ -L /etc/opendkim && "$(readlink -f /etc/opendkim)" == "$(readlink -f "$source")" ]]; then
+        return 0
+    fi
+
+    if [[ -e /etc/opendkim || -L /etc/opendkim ]]; then
+        backup="/etc/opendkim.postfixer-backup-$(date -u +%Y%m%d%H%M%S)"
+        mv /etc/opendkim "$backup"
+        log "Backed up existing /etc/opendkim to ${backup}"
+    fi
+
+    ln -s "$source" /etc/opendkim
+    log "Linked /etc/opendkim to ${source} for the opt-in Tornevall profile"
+}
+
 configure_opendkim_node() {
     local conf=/etc/opendkim.conf trusted="${POSTFIXER_DKIM_DIR}/trusted.hosts" line
 
@@ -664,6 +685,7 @@ full_install() {
     fi
 
     apply_postfix_configuration
+    link_tornevall_opendkim_tree
     configure_opendkim_node
     rebuild_postfix_maps
     deploy_courier_certificate

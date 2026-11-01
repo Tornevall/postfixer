@@ -29,6 +29,12 @@ POSTFIXER_RELAY_RECIPIENTS_FILE=/etc/postfix/postfixer.d/relay-recipients
 POSTFIXER_TRANSPORT_FILE=/etc/postfix/postfixer.d/transport
 POSTFIXER_DKIM_DIR=/etc/opendkim
 
+# Personal Tornevall-only exception. Leave disabled for generic installations.
+# When enabled, the installer backs up an existing /etc/opendkim and links it to
+# this external tree so local OpenDKIM keys and tables can be reused.
+# POSTFIXER_USE_TORNEVALL_OPENDKIM=yes
+# POSTFIXER_TORNEVALL_OPENDKIM_DIR=/var/tornevall/system/etc/opendkim
+
 # Local spamd is always installed and should be first. Optional failover hosts
 # may follow as a comma-separated list, for example 127.0.0.1,spamd-backup.example.com.
 POSTFIXER_SPAMD_HOSTS=127.0.0.1

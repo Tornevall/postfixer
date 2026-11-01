@@ -344,6 +344,19 @@ On an `inout` server, `make cert` also rebuilds the combined Courier PEM files a
 
 OpenDKIM is configured on both roles.
 
+For the author's existing Tornevall server only, the node configuration may opt
+into reusing the external OpenDKIM tree:
+
+```text
+POSTFIXER_USE_TORNEVALL_OPENDKIM=yes
+POSTFIXER_TORNEVALL_OPENDKIM_DIR=/var/tornevall/system/etc/opendkim
+```
+
+This is deliberately disabled by default and must not be enabled for generic
+installations or administrators who manage their own `/etc/opendkim`. When it is
+enabled, the installer backs up an existing directory and creates the symlink
+`/etc/opendkim` to the configured external tree.
+
 The migrated model uses:
 
 ```text
