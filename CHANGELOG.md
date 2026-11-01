@@ -6,6 +6,8 @@ All notable changes to Postfixer are documented in this file.
 
 ### Changed
 
+- Documented that Postfixer originated as a personal migration tool for an
+  existing production mail server while remaining generic and reusable.
 - Required passwordless SSH key or agent authentication for remote Postfix and
   Maildir imports. Import commands now use OpenSSH `BatchMode=yes` and fail
   instead of waiting for password input.
