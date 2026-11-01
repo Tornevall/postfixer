@@ -36,6 +36,7 @@ All notable changes to Postfixer are documented in this file.
   filtering as the default with no external spamd dependency.
 - Added Razor, Pyzor, SPF and SQL Perl dependencies needed by migrated custom
   SpamAssassin profiles, plus lint and listener health checks.
+- Included SpamAssassin rules and daemon defaults in pre-install/apply backups.
 
 ## 2026-11-01 - Initial working release candidate
 

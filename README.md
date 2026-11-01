@@ -221,6 +221,8 @@ Backups are written below:
 /root/postfixer-backup-*
 ```
 
+They include Postfix, Courier, SASL/PAM and SpamAssassin rules and daemon defaults.
+
 ### How installer answers update Postfix
 
 The installer does not generate a host-specific `main.cf` template. It stores node answers below `/etc/postfix/postfixer.d` and updates the package-generated `/etc/postfix/main.cf` safely through `postconf`:
@@ -535,6 +537,8 @@ For both `inout` and `relay` nodes, the checks include:
 - `postfix check`.
 - Required services are active.
 - The `policyd-spf` service exists in `master.cf`.
+- SpamAssassin configuration passes `spamassassin --lint`.
+- Local `spamd` is active on `127.0.0.1:783` and its Postfix pipe exists.
 - Cyrus SASL is compiled into Postfix.
 - The saslauthd mux socket exists inside the Postfix chroot.
 - The submission service exists in `master.cf`.

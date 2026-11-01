@@ -137,7 +137,10 @@ backup_existing_configuration() {
     local backup_dir="${BACKUP_ROOT}/postfixer-backup-${TIMESTAMP}"
     local copied=0
 
-    for path in /etc/postfix /etc/courier /etc/default/saslauthd /etc/pam.d/imap /etc/pam.d/pop3; do
+    for path in \
+        /etc/postfix /etc/courier \
+        /etc/default/saslauthd /etc/default/spamassassin /etc/spamassassin \
+        /etc/pam.d/imap /etc/pam.d/pop3; do
         [[ -e "$path" || -L "$path" ]] || continue
 
         if [[ "$copied" -eq 0 ]]; then
