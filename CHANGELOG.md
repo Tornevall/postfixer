@@ -6,6 +6,12 @@ All notable changes to Postfixer are documented in this file.
 
 ### Changed
 
+- Hardened OpenDKIM maintenance and migration handling: external trees and
+  Git-restored keys are normalized to `opendkim:opendkim` with private keys at
+  `0600` and tables at `0640`; `make check` now detects unsafe permissions and
+  the migration report documents the required repair step.
+- Documented that mailbox display names and delivery aliases do not change PAM
+  login names; migrated IMAP/SMTP credentials must use the actual Unix account.
 - Clarified clean-server installation and documented how every interactive node
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,
@@ -52,6 +58,12 @@ All notable changes to Postfixer are documented in this file.
   complete Maildir tree, including Courier folders and message files.
 - Added an opt-in Tornevall certificate-tree link so Postfix and Courier can
   use the externally synchronized `/var/tornevall/system/etc/letsencrypt` tree.
+- Documented target-version SpamAssassin linting during migration, including
+  deactivation/porting of removed plugins such as Hashcash and review of stale
+  source-server DNS/trusted-network entries.
+- Fixed the active migrated SpamAssassin profile by disabling its unavailable
+  Hashcash plugin and removing the retired Bitbucket/DNS address; the clean lint
+  result is now part of the cutover validation.
 
 ## 2026-11-01 - Initial working release candidate
 

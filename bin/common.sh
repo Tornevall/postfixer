@@ -637,6 +637,10 @@ check_mail_stack() {
         fi
     done
 
+    if declare -F check_opendkim_permissions >/dev/null 2>&1; then
+        check_opendkim_permissions
+    fi
+
     if command -v ss >/dev/null 2>&1; then
         printf '\nListening mail ports:\n'
         ss -ltnp 2>/dev/null | awk 'NR == 1 || $4 ~ /:(25|110|143|465|587|993|995)$/' || true
@@ -724,6 +728,9 @@ maintenance_action() {
                 courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl 2>/dev/null || true
             ;;
         restart)
+            load_postfixer_config
+            link_tornevall_opendkim_tree
+            normalize_opendkim_permissions
             deploy_courier_certificate
             enable_and_restart_services
             check_mail_stack

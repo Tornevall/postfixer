@@ -226,12 +226,16 @@ install_postfixer_samples() {
     install -d -m 0755 "$samples_dir"
     for source in "${POSTFIXER_CONFIG_SOURCE}"/*.example; do
         [[ -f "$source" ]] || continue
-        install -m 0644 "$source" "${samples_dir}/$(basename "$source")"
+        target="${samples_dir}/$(basename "$source")"
+        [[ -e "$target" ]] || install -m 0644 "$source" "$target"
     done
 
     if [[ -d "${ROOT_DIR}/samples-postfixer" ]]; then
-        cp -a "${ROOT_DIR}/samples-postfixer/." "$samples_dir/"
-        find "$samples_dir" -type f -exec chmod 0644 {} +
+        for source in "${ROOT_DIR}/samples-postfixer"/*; do
+            [[ -f "$source" ]] || continue
+            target="${samples_dir}/$(basename "$source")"
+            [[ -e "$target" ]] || install -m 0644 "$source" "$target"
+        done
     fi
 }
 
@@ -469,6 +473,7 @@ link_tornevall_opendkim_tree() {
     [[ -d "$source" ]] || die "Tornevall OpenDKIM directory is missing: ${source}"
 
     if [[ -L /etc/opendkim && "$(readlink -f /etc/opendkim)" == "$(readlink -f "$source")" ]]; then
+        normalize_opendkim_permissions
         return 0
     fi
 
@@ -480,6 +485,46 @@ link_tornevall_opendkim_tree() {
 
     ln -s "$source" /etc/opendkim
     log "Linked /etc/opendkim to ${source} for the opt-in Tornevall profile"
+
+    normalize_opendkim_permissions
+}
+
+normalize_opendkim_permissions() {
+    local d="${POSTFIXER_DKIM_DIR:-/etc/opendkim}"
+
+    [[ -d "$d" ]] || return 0
+    install -d -o opendkim -g opendkim -m 0750 "$d"
+    [[ -d "$d/keys" ]] && install -d -o opendkim -g opendkim -m 0700 "$d/keys"
+
+    for file in "$d/key.table" "$d/signing.table" "$d/trusted.hosts"; do
+        [[ -f "$file" ]] || continue
+        chown opendkim:opendkim "$file"
+        chmod 0640 "$file"
+    done
+
+    if [[ -d "$d/keys" ]]; then
+        find "$d/keys" -type f -name '*.private' \
+            -exec chown opendkim:opendkim {} + \
+            -exec chmod 0600 {} + 2>/dev/null || true
+    fi
+}
+
+check_opendkim_permissions() {
+    local d="${POSTFIXER_DKIM_DIR:-/etc/opendkim}"
+    local file mode owner group
+
+    [[ -d "$d" ]] || return 0
+    for file in "$d/key.table" "$d/signing.table" "$d/trusted.hosts"; do
+        [[ -f "$file" ]] || continue
+        read -r owner group mode < <(stat -c '%U %G %a' "$file")
+        [[ "$owner:$group" == opendkim:opendkim && "$mode" == 640 ]] || \
+            die "Unsafe OpenDKIM table permissions: ${file} (${owner}:${group} ${mode}). Run make apply."
+    done
+    while IFS= read -r file; do
+        read -r owner group mode < <(stat -c '%U %G %a' "$file")
+        [[ "$owner:$group" == opendkim:opendkim && "$mode" == 600 ]] || \
+            die "Unsafe OpenDKIM private-key permissions: ${file} (${owner}:${group} ${mode}). Run make apply."
+    done < <(find "$d/keys" -type f -name '*.private' 2>/dev/null)
 }
 
 link_tornevall_letsencrypt_tree() {
@@ -547,6 +592,7 @@ configure_opendkim_node() {
     chown opendkim:opendkim "${POSTFIXER_DKIM_DIR}/key.table" "${POSTFIXER_DKIM_DIR}/signing.table"
     chmod 0640 "${POSTFIXER_DKIM_DIR}/key.table" "${POSTFIXER_DKIM_DIR}/signing.table"
     find "${POSTFIXER_DKIM_DIR}/keys" -type f -name '*.private' -exec chown opendkim:opendkim {} + -exec chmod 0600 {} + 2>/dev/null || true
+    normalize_opendkim_permissions
 }
 
 install_courier_from_archive() {

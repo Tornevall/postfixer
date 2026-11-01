@@ -126,6 +126,15 @@ Review before applying:
   - mynetworks should point to /etc/postfix/postfixer.d/networks on new installations.
   - TLS paths should resolve through /etc/letsencrypt on the target node.
   - DKIM keys belong under /etc/opendkim and private keys should not be committed.
+  - If an external DKIM tree is linked into /etc/opendkim, run make apply after
+    importing or updating it. Git restores private keys as 0644 unless the
+    installer reapplies opendkim:opendkim ownership and mode 0600.
+  - Run make check after the DKIM permission repair; it fails closed on unsafe
+    private-key or table permissions before production cutover.
+  - Run spamassassin --lint on the target after importing any local SpamAssassin
+    profile. Ubuntu Noble no longer ships every SpamAssassin 3 plugin; disable
+    or port unavailable plugins such as Hashcash, and review trusted_networks
+    and dns_server entries for retired source-server addresses.
 
 Suggested review commands:
   diff -ruN /etc/postfix ${FETCHED_DIR}

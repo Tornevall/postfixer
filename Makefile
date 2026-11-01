@@ -10,7 +10,7 @@ REMOTE ?=
 REMOTE_HOME_ROOT ?= /home
 MIGRATION_NAME ?= postfix-import
 
-.PHONY: install install-server install-relay apply maps aliases cert check status restart reload purge reset import-fetch import-users import-mail import-mail-final import-config test help
+.PHONY: install install-server install-relay apply sync maps aliases cert check status restart reload purge reset import-fetch import-users import-mail import-mail-final import-config test help
 
 install:
 	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
@@ -23,6 +23,8 @@ install-relay:
 
 apply:
 	@bash $(INSTALLER) --apply
+
+sync: apply maps cert restart
 
 maps:
 	@bash $(INSTALLER) --maps
@@ -81,6 +83,7 @@ help:
 		'sudo make install-relay  - install a relay without IMAP/POP' \
 		'sudo make install        - choose the role interactively' \
 		'make apply    - reapply shared and node-specific configuration' \
+		'make sync     - apply config, rebuild maps, sync certs, restart and check' \
 		'make maps     - rebuild configured Postfix hash maps' \
 		'make aliases  - rebuild aliases and reload Postfix' \
 		'make cert     - deploy externally managed Lets Encrypt certificates' \

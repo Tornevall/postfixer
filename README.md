@@ -389,7 +389,7 @@ non_smtpd_milters = inet:127.0.0.1:18891
 
 `Mode sv` allows the same filter to sign qualifying internal/authenticated originating mail and verify external mail.
 
-DKIM private keys are not stored in Git. Existing keys must be migrated separately. Postfixer normalizes migrated `*.private` files to mode `0600`.
+DKIM private keys are not stored in Git. Existing keys must be migrated separately. Postfixer normalizes migrated or externally linked `*.private` files to `opendkim:opendkim` mode `0600`, and the key/signing/trusted tables to `opendkim:opendkim` mode `0640`. This is important when the external tree is updated with Git, because Git commonly restores private-key files as `0644`. `make apply` repairs the permissions; `make check` fails if they are unsafe.
 
 ## Spam and policy processing
 
@@ -412,7 +412,7 @@ POSTFIXER_SPAMD_HOSTS=127.0.0.1,spamd-backup.example.com
 
 The managed Postfix pipe runs `spamc` with safe fallback (`-f`). It tries the configured hosts and, if no `spamd` can filter the message, returns the original message for normal delivery instead of rejecting or losing it. If the pipe process or Postfix reinjection itself fails, Postfix defers the message in its queue for retry. Filtering failure therefore does not intentionally block mail, but monitoring should alert because messages may pass through unfiltered.
 
-Site-specific rules, Razor identities, Bayes databases and SQL credentials belong under `/etc/spamassassin` or another root-controlled external tree, never in Git. Installations migrated from SpamAssassin 3 must run `spamassassin --lint` on the target version: removed plugins such as Hashcash must be disabled or ported before activation.
+Site-specific rules, Razor identities, Bayes databases and SQL credentials belong under `/etc/spamassassin` or another root-controlled external tree, never in Git. Installations migrated from SpamAssassin 3 must run `spamassassin --lint` on the target version: removed plugins such as Hashcash must be disabled or ported before activation. Also review every `trusted_networks`, `internal_networks` and `dns_server` entry for addresses belonging to the retired server; stale entries can cause warnings or incorrect trust decisions. `make check` runs this lint and fails when it is not clean.
 
 ClamAV and OpenDMARC are installed, while their complete message-body integration remains separate migration work. OpenDKIM, SPF and Postgrey are already active in the SMTP path.
 
@@ -660,6 +660,12 @@ Postfixer also exports the primary group records required by those GIDs. It does
 
 Postfixer deliberately does not overwrite `/etc/passwd`, `/etc/group` or `/etc/shadow` automatically. Review UID/GID conflicts, required groups, locked accounts, password expiry fields and hash compatibility on the new Ubuntu release before merging account data. Hashes beginning with `!` or `*` remain locked, and old or unsupported hash formats may require a password reset. The staged account files are mode `0600`, remain outside Git and must be deleted securely after migration.
 
+Only accounts whose home directory contains a real `Maildir` are discovered
+automatically. Service names, display names and mail aliases are not Unix/PAM
+login names: for example, a mailbox displayed as “SpamBox” may authenticate as
+the Unix user `unknown`. IMAP and SMTP AUTH must use that Unix username unless
+an explicit separate account is created.
+
 ```bash
 sudo make import-fetch REMOTE=root@old-mail.example.com
 sudo make import-users REMOTE=root@old-mail.example.com
@@ -726,7 +732,7 @@ This is the complete recommended sequence for replacing an existing mailbox serv
      sudo spamc -c -d 127.0.0.1
    ```
 
-7. Test SMTP, STARTTLS, AUTH, IMAP/POP and certificates directly against the target address or a temporary hosts-file entry. The production MX still points to the old server.
+7. Test SMTP, STARTTLS, AUTH, IMAP/POP and certificates directly against the target address or a temporary hosts-file entry. Run `spamassassin --lint` and verify that OpenDKIM signs a locally submitted message. The production MX still points to the old server.
 
 #### Phase 2: inventory and pre-sync while the source remains live
 
