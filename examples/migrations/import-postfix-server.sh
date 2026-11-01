@@ -262,7 +262,7 @@ fetch_maildirs() {
             install -d -m 0700 "$target_maildir"
             rsync -aHAX --numeric-ids --delete --partial --info=stats2 \
                 "${target}/" "${target_maildir}/"
-            chown "$target_uid:$target_gid" "$target_maildir"
+            chown -R "$target_uid:$target_gid" "$target_maildir"
         fi
     done < "$paths_file"
 

@@ -788,7 +788,9 @@ Schedule a short maintenance window. Immediately before the freeze, confirm that
 `make import-mail-final` performs step 4 automatically. It resolves each target
 home from the local passwd database, synchronizes the exact Maildir below that
 home and applies the target user's UID/GID to the Maildir directory. The target
-root can be changed with `TARGET_HOME_ROOT` and defaults to `/home`.
+root can be changed with `TARGET_HOME_ROOT` and defaults to `/home`. Ownership
+is applied recursively to the complete Maildir tree so migrated files and
+Courier folders remain writable by the mailbox user.
 
 #### Phase 5: validate before changing MX
 

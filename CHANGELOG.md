@@ -48,6 +48,8 @@ All notable changes to Postfixer are documented in this file.
   queue handling, verification results and MX/PTR cutover.
 - Added an explicit opt-in Tornevall OpenDKIM tree link for the personal
   migration profile without changing generic installations.
+- Final Maildir imports now recursively apply the target user's UID/GID to the
+  complete Maildir tree, including Courier folders and message files.
 
 ## 2026-11-01 - Initial working release candidate
 
