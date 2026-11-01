@@ -10,6 +10,8 @@ All notable changes to Postfixer are documented in this file.
   answer updates the active `main.cf`, `master.cf` or modular data files.
 - Documented filtered `passwd`/`shadow` migration, password-hash preservation,
   UID/GID ownership requirements and the cases that still require a reset.
+- Fixed Maildir account discovery to match each directory against the account's
+  `passwd` home field instead of assuming the directory basename is the username.
 - Documented that Postfixer originated as a personal migration tool for an
   existing production mail server while remaining generic and reusable.
 - Required passwordless SSH key or agent authentication for remote Postfix and

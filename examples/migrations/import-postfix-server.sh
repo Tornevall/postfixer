@@ -138,23 +138,31 @@ fetch_remote_postfix() {
 
 fetch_maildir_users() {
     local users_file="${STAGING_DIR}/maildir-users.txt"
+    local paths_file="${STAGING_DIR}/maildir-paths.tsv"
     local passwd_file="${STAGING_DIR}/passwd.maildir-users"
     local shadow_file="${STAGING_DIR}/shadow.maildir-users"
     local report_file="${STAGING_DIR}/maildir-users.report"
 
     require_remote
-    log "Discovering active Maildir users on ${REMOTE}"
+    log "Discovering passwd-backed Maildir users on ${REMOTE}"
     mkdir -p "$STAGING_DIR"
 
     ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" "set -e
+        homes_file=\$(mktemp)
+        trap 'rm -f \"\$homes_file\"' EXIT
         find ${REMOTE_HOME_ROOT} -mindepth 2 -maxdepth 2 \
             -type d -name Maildir -printf '%h\\n' 2>/dev/null |
-        awk -F/ 'NF {print \$NF}' |
+        sort -u > \"\$homes_file\"
+        getent passwd |
+        awk -F: 'NR == FNR {homes[\$0] = 1; next} (\$6 in homes) {printf \"%s\\t%s/Maildir\\n\", \$1, \$6}' \
+            \"\$homes_file\" - |
         sort -u
-    " > "$users_file"
+    " > "$paths_file"
+
+    cut -f1 "$paths_file" > "$users_file"
 
     if [[ ! -s "$users_file" ]]; then
-        die "No Maildir users were found below ${REMOTE}:${REMOTE_HOME_ROOT}."
+        die "No passwd-backed Maildir users were found below ${REMOTE}:${REMOTE_HOME_ROOT}."
     fi
 
     ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" 'set -e
@@ -175,15 +183,15 @@ fetch_maildir_users() {
         rm -f "$tmp"
     ' < "$users_file" > "$shadow_file"
 
-    chmod 0600 "$users_file" "$passwd_file" "$shadow_file"
+    chmod 0600 "$users_file" "$paths_file" "$passwd_file" "$shadow_file"
 
     {
         printf 'Maildir user export from %s\n\n' "$REMOTE"
-        printf 'Users with %s/*/Maildir: %s\n' "$REMOTE_HOME_ROOT" "$(wc -l < "$users_file")"
+        printf 'Passwd-backed users with %s/*/Maildir: %s\n' "$REMOTE_HOME_ROOT" "$(wc -l < "$users_file")"
         printf 'passwd entries exported: %s\n' "$(wc -l < "$passwd_file")"
         printf 'shadow entries exported: %s\n' "$(wc -l < "$shadow_file")"
         printf '\nFiles:\n'
-        printf '  %s\n' "$users_file" "$passwd_file" "$shadow_file"
+        printf '  %s\n' "$users_file" "$paths_file" "$passwd_file" "$shadow_file"
         printf '\nThese files contain account and password-hash material. Keep them outside Git.\n'
     } > "$report_file"
     chmod 0600 "$report_file"
@@ -192,23 +200,27 @@ fetch_maildir_users() {
 }
 
 fetch_maildirs() {
-    local users_file="${STAGING_DIR}/maildir-users.txt"
-    local user target
+    local paths_file="${STAGING_DIR}/maildir-paths.tsv"
+    local user remote_maildir target
 
     require_remote
-    [[ -s "$users_file" ]] || die "Missing ${users_file}. Run --fetch-maildir-users first."
+    [[ -s "$paths_file" ]] || die "Missing ${paths_file}. Run --fetch-maildir-users first."
     install -d -m 0700 "$MAILDIR_STAGING_DIR"
 
-    while IFS= read -r user; do
-        [[ "$user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Unsafe user name in ${users_file}: ${user}"
+    while IFS=$'\t' read -r user remote_maildir; do
+        [[ "$user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Unsafe user name in ${paths_file}: ${user}"
+        [[ "$remote_maildir" =~ ^/[A-Za-z0-9._/-]+/Maildir$ ]] || die \
+            "Unsafe Maildir path in ${paths_file}: ${remote_maildir}"
+        [[ "$remote_maildir" == "${REMOTE_HOME_ROOT%/}/"*"/Maildir" ]] || die \
+            "Maildir path is outside REMOTE_HOME_ROOT in ${paths_file}: ${remote_maildir}"
         target="${MAILDIR_STAGING_DIR}/${user}/Maildir"
         install -d -m 0700 "$target"
-        log "Fetching ${REMOTE_HOME_ROOT}/${user}/Maildir from ${REMOTE}"
+        log "Fetching ${remote_maildir} for ${user} from ${REMOTE}"
         rsync -aHAX --numeric-ids --partial --info=progress2,stats2 \
             -e "$RSYNC_SSH_COMMAND" \
-            "${REMOTE}:${REMOTE_HOME_ROOT}/${user}/Maildir/" \
+            "${REMOTE}:${remote_maildir}/" \
             "${target}/"
-    done < "$users_file"
+    done < "$paths_file"
 
     log "Maildir staging completed below ${MAILDIR_STAGING_DIR}"
 }

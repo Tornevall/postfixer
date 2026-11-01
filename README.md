@@ -600,7 +600,7 @@ sudo ssh -o BatchMode=yes root@old-mail.example.com true
 
 Run the verification as the same local account that runs the migration. When the migration runs through `sudo`, place the identity in root's SSH configuration or preserve a suitable agent with `sudo --preserve-env=SSH_AUTH_SOCK`. The remote account must be able to read `/etc/postfix`, all mailbox directories and, for account export, the shadow database.
 
-Mailbox discovery includes every `/home/*/Maildir` directory, including empty Maildirs. If a server stores home directories elsewhere, set `REMOTE_HOME_ROOT`, for example `sudo make import-users REMOTE=root@old-mail.example.com REMOTE_HOME_ROOT=/srv/home`, and use the same value for `make import-mail`.
+Mailbox discovery scans every `/home/*/Maildir` directory, including empty Maildirs, but imports only directories whose parent path exactly matches a real account's home-directory field in `passwd`. This also handles accounts where the username and home-directory basename differ. Unrelated system accounts and orphaned Maildir directories are excluded. If a server stores home directories elsewhere, set `REMOTE_HOME_ROOT`, for example `sudo make import-users REMOTE=root@old-mail.example.com REMOTE_HOME_ROOT=/srv/home`, and use the same value for `make import-mail`.
 
 ### Password and account migration
 
@@ -609,6 +609,7 @@ Both Courier and SMTP AUTH use PAM against the target server's local Unix accoun
 ```text
 /root/postfixer-migration/postfix-import/passwd.maildir-users
 /root/postfixer-migration/postfix-import/shadow.maildir-users
+/root/postfixer-migration/postfix-import/maildir-paths.tsv
 ```
 
 A password reset is normally not required when the original shadow password hash is installed on the new account. Preserve the username, UID, primary GID, home directory and shell when creating the target account, then preserve its complete shadow entry or encrypted password hash. Keeping UID/GID values aligned also keeps the transferred Maildir ownership correct.

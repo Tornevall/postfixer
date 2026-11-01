@@ -323,18 +323,22 @@ set -Eeuo pipefail
 printf '%s\n' "$*" >> "$SSH_LOG"
 
 case "$*" in
+    *'find /home'*)
+        printf 'alice\t/home/alice/Maildir\ntestmailserver\t/home/testmail/Maildir\n'
+        ;;
     *'getent passwd'*)
         while IFS= read -r user; do
-            printf '%s:x:1000:1000::/home/%s:/bin/bash\n' "$user" "$user"
+            if [[ "$user" == testmailserver ]]; then
+                printf '%s:x:1000:1000::/home/testmail:/bin/bash\n' "$user"
+            else
+                printf '%s:x:1000:1000::/home/%s:/bin/bash\n' "$user" "$user"
+            fi
         done
         ;;
     *'getent shadow'*)
         while IFS= read -r user; do
             printf '%s:hash:1:0:99999:7:::\n' "$user"
         done
-        ;;
-    *'find /home'*)
-        printf 'alice\nbob\n'
         ;;
 esac
 EOF_SSH
@@ -357,28 +361,30 @@ EOF_RSYNC
         >/dev/null
 
     grep -Fxq alice "${staging_dir}/maildir-users.txt" || fail "alice Maildir was not discovered"
-    grep -Fxq bob "${staging_dir}/maildir-users.txt" || fail "bob Maildir was not discovered"
+    grep -Fxq testmailserver "${staging_dir}/maildir-users.txt" || \
+        fail "account with a differently named home directory was not discovered"
     grep -Fq 'alice:x:1000:1000::/home/alice:/bin/bash' "${staging_dir}/passwd.maildir-users" || \
         fail "alice passwd entry was not staged"
-    grep -Fq 'bob:x:1000:1000::/home/bob:/bin/bash' "${staging_dir}/passwd.maildir-users" || \
-        fail "bob passwd entry was not staged"
+    grep -Fq 'testmailserver:x:1000:1000::/home/testmail:/bin/bash' "${staging_dir}/passwd.maildir-users" || \
+        fail "testmailserver passwd entry was not staged"
     grep -Fq 'alice:hash:' "${staging_dir}/shadow.maildir-users" || \
         fail "alice shadow hash was not staged"
-    grep -Fq 'bob:hash:' "${staging_dir}/shadow.maildir-users" || \
-        fail "bob shadow hash was not staged"
+    grep -Fq 'testmailserver:hash:' "${staging_dir}/shadow.maildir-users" || \
+        fail "testmailserver shadow hash was not staged"
     [[ "$(stat -c '%a' "${staging_dir}/passwd.maildir-users")" == 600 ]] || \
         fail "staged passwd entries are not mode 0600"
     [[ "$(stat -c '%a' "${staging_dir}/shadow.maildir-users")" == 600 ]] || \
         fail "staged shadow entries are not mode 0600"
     [[ -d "${staging_dir}/maildirs/alice/Maildir" ]] || fail "alice Maildir staging was not created"
-    [[ -d "${staging_dir}/maildirs/bob/Maildir" ]] || fail "bob Maildir staging was not created"
+    [[ -d "${staging_dir}/maildirs/testmailserver/Maildir" ]] || \
+        fail "testmailserver Maildir staging was not created"
     grep -Fq -- '-o BatchMode=yes' "$ssh_log" || fail "SSH synchronization did not use BatchMode"
     grep -Fq -- '-e ssh -o BatchMode=yes -o ConnectTimeout=10' "$rsync_log" || \
         fail "rsync synchronization did not use passwordless SSH options"
     grep -Fq 'root@mail-old.example.com:/home/alice/Maildir/' "$rsync_log" || \
         fail "rsync did not fetch alice from /home"
-    grep -Fq 'root@mail-old.example.com:/home/bob/Maildir/' "$rsync_log" || \
-        fail "rsync did not fetch bob from /home"
+    grep -Fq 'root@mail-old.example.com:/home/testmail/Maildir/' "$rsync_log" || \
+        fail "rsync did not use the passwd-backed home path for testmailserver"
 }
 
 run_profile_install inout
