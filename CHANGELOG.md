@@ -50,6 +50,8 @@ All notable changes to Postfixer are documented in this file.
   migration profile without changing generic installations.
 - Final Maildir imports now recursively apply the target user's UID/GID to the
   complete Maildir tree, including Courier folders and message files.
+- Added an opt-in Tornevall certificate-tree link so Postfix and Courier can
+  use the externally synchronized `/var/tornevall/system/etc/letsencrypt` tree.
 
 ## 2026-11-01 - Initial working release candidate
 

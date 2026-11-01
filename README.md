@@ -357,6 +357,18 @@ installations or administrators who manage their own `/etc/opendkim`. When it is
 enabled, the installer backs up an existing directory and creates the symlink
 `/etc/opendkim` to the configured external tree.
 
+The same personal opt-in pattern is available for the externally synchronized
+certificate tree:
+
+```text
+POSTFIXER_USE_TORNEVALL_LETSENCRYPT=yes
+POSTFIXER_TORNEVALL_LETSENCRYPT_DIR=/var/tornevall/system/etc/letsencrypt
+```
+
+When enabled, the installer links `/etc/letsencrypt` to that tree before it
+deploys Postfix and Courier certificates. Generic installations leave
+`/etc/letsencrypt` under the administrator's control.
+
 The migrated model uses:
 
 ```text

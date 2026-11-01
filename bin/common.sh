@@ -696,9 +696,11 @@ maintenance_action() {
             [[ -d /etc/postfix ]] || die "Postfix is not installed. Run make install first."
             backup_existing_configuration
             load_postfixer_config
+            link_tornevall_letsencrypt_tree
             link_tornevall_opendkim_tree
             configure_opendkim_node
             apply_postfix_configuration
+            deploy_courier_certificate
             rebuild_postfix_maps
             postfix check
             systemctl restart opendkim.service
@@ -722,6 +724,7 @@ maintenance_action() {
                 courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl 2>/dev/null || true
             ;;
         restart)
+            deploy_courier_certificate
             enable_and_restart_services
             check_mail_stack
             ;;

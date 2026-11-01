@@ -482,6 +482,27 @@ link_tornevall_opendkim_tree() {
     log "Linked /etc/opendkim to ${source} for the opt-in Tornevall profile"
 }
 
+link_tornevall_letsencrypt_tree() {
+    local source backup
+
+    [[ "${POSTFIXER_USE_TORNEVALL_LETSENCRYPT:-no}" == yes ]] || return 0
+    source="${POSTFIXER_TORNEVALL_LETSENCRYPT_DIR:-/var/tornevall/system/etc/letsencrypt}"
+    [[ -d "$source" ]] || die "Tornevall Let's Encrypt directory is missing: ${source}"
+
+    if [[ -L /etc/letsencrypt && "$(readlink -f /etc/letsencrypt)" == "$(readlink -f "$source")" ]]; then
+        return 0
+    fi
+
+    if [[ -e /etc/letsencrypt || -L /etc/letsencrypt ]]; then
+        backup="/etc/letsencrypt.postfixer-backup-$(date -u +%Y%m%d%H%M%S)"
+        mv /etc/letsencrypt "$backup"
+        log "Backed up existing /etc/letsencrypt to ${backup}"
+    fi
+
+    ln -s "$source" /etc/letsencrypt
+    log "Linked /etc/letsencrypt to ${source} for the opt-in Tornevall profile"
+}
+
 configure_opendkim_node() {
     local conf=/etc/opendkim.conf trusted="${POSTFIXER_DKIM_DIR}/trusted.hosts" line
 
@@ -563,6 +584,7 @@ apply_postfix_configuration() {
 deploy_courier_certificate() {
     load_postfixer_config
     configure_postfix_node
+    link_tornevall_letsencrypt_tree
 
     if [[ "$POSTFIXER_ROLE" == relay ]]; then
         if systemctl is-active --quiet postfix.service 2>/dev/null; then
@@ -685,6 +707,7 @@ full_install() {
     fi
 
     apply_postfix_configuration
+    link_tornevall_letsencrypt_tree
     link_tornevall_opendkim_tree
     configure_opendkim_node
     rebuild_postfix_maps

@@ -35,6 +35,11 @@ POSTFIXER_DKIM_DIR=/etc/opendkim
 # POSTFIXER_USE_TORNEVALL_OPENDKIM=yes
 # POSTFIXER_TORNEVALL_OPENDKIM_DIR=/var/tornevall/system/etc/opendkim
 
+# Personal Tornevall-only certificate source. Leave disabled for generic
+# installations that manage /etc/letsencrypt themselves.
+# POSTFIXER_USE_TORNEVALL_LETSENCRYPT=yes
+# POSTFIXER_TORNEVALL_LETSENCRYPT_DIR=/var/tornevall/system/etc/letsencrypt
+
 # Local spamd is always installed and should be first. Optional failover hosts
 # may follow as a comma-separated list, for example 127.0.0.1,spamd-backup.example.com.
 POSTFIXER_SPAMD_HOSTS=127.0.0.1
