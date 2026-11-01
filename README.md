@@ -4,6 +4,8 @@ Postfixer is a mail server customizer for Ubuntu.
 
 The purpose is to replace several generations of hand-built Postfix servers with one reproducible installer that can customize either a complete inbound/outbound mail server or a relay helper from the same repository.
 
+See [CHANGELOG.md](CHANGELOG.md) for the complete release history and current known limitations.
+
 It is not intended to ship one server-specific `main.cf`. Shared Postfix configuration belongs in Git. Node identity, relay routing, trusted networks and role-specific settings belong under `/etc/postfix/postfixer.d`.
 
 ## What Postfixer is intended to replace
