@@ -261,3 +261,9 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 
 - Allow an explicit MAILMAN_TARGET_DOMAIN during reviewed imports, retaining
   original addresses for installations with more than one list domain.
+
+## 2026-11-02: Reviewed historical public archives
+
+- Preserve an explicit public-archive directory marker across reinstall; render
+  a read-only Pipermail alias only for a reviewed directory below /var/www,
+  with directory listing and symlink access disabled. Add path-isolation tests.

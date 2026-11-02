@@ -147,3 +147,13 @@ Review its original `host_name` before importing; never collapse separate list
 domains into the installer default. The importer registers the selected domain
 without enabling public archives or releasing the moderation hold. DNS/MX for
 that domain must separately reach this mail server.
+
+### Reviewed legacy public HTML
+
+After copying only the originally public list HTML into a separate directory
+under `/var/www/`, put that directory path in the root-owned
+`/etc/postfixer-mailman3/legacy-public-archives` marker. Reinstall preserves the
+marker and renders a read-only `/pipermail/` alias with symlink access disabled.
+The default remains 404. Never copy private list HTML or mbox trees into that
+public directory. Private restored lists remain available only through
+authenticated HyperKitty.

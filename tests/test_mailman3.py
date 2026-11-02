@@ -140,5 +140,27 @@ class MigrationTests(unittest.TestCase):
                 migration.valid_list(name)
 
 
+
+class PublicArchiveTests(unittest.TestCase):
+    def test_legacy_archives_are_closed_without_explicit_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertIn('return 404', m.legacy_archive_location(Path(folder) / 'missing'))
+
+    def test_only_a_reviewed_public_subdirectory_can_be_exposed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder); public = base / 'www'; public.mkdir()
+            selected = public / 'archives'; selected.mkdir()
+            marker = base / 'marker'; marker.write_text(str(selected))
+            result = m.legacy_archive_location(marker, public)
+            self.assertIn('disable_symlinks on', result)
+            self.assertIn(str(selected), result)
+            for wrong in [base, public]:
+                marker.write_text(str(wrong))
+                with self.assertRaises(RuntimeError): m.legacy_archive_location(marker, public)
+            outside = base / 'private'; outside.mkdir()
+            link = public / 'link'; link.symlink_to(outside)
+            marker.write_text(str(link))
+            with self.assertRaises(RuntimeError): m.legacy_archive_location(marker, public)
+
 if __name__ == '__main__':
     unittest.main()

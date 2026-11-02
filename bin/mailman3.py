@@ -74,6 +74,16 @@ def as_user(*args, **kwargs):
                *args, **kwargs)
 
 
+def legacy_archive_location(marker, allowed_root=Path('/var/www')):
+    if not marker.is_file():
+        return 'location /pipermail/ { return 404; }'
+    public_dir = Path(marker.read_text().strip()).resolve(strict=True)
+    allowed_root = allowed_root.resolve(strict=True)
+    if not public_dir.is_dir() or public_dir == allowed_root or not public_dir.is_relative_to(allowed_root) or not re.fullmatch(r'/[A-Za-z0-9_./-]+', str(public_dir)):
+        raise RuntimeError('Legacy public archive path must be a reviewed directory under /var/www')
+    return 'location /pipermail/ { alias ' + str(public_dir) + '/; autoindex off; disable_symlinks on; }'
+
+
 def configure_postfix():
     if not (CONFIG / 'mailman.cfg').exists():
         raise RuntimeError('Install Mailman before configuring Postfix')
@@ -303,6 +313,7 @@ UMask={'0022' if name == 'core' else '0027'}
 [Install]
 WantedBy=multi-user.target
 ''')
+    legacy_location = legacy_archive_location(CONFIG / 'legacy-public-archives')
     nginx = f'''# Managed by Postfixer. Mailman API/LMTP are never public.
 server {{
     listen 80;
@@ -323,8 +334,8 @@ server {{
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $remote_addr;
     }}
-    # Legacy private archives require authenticated migration; never expose a directory.
-    location /pipermail/ {{ return 404; }}
+    # Only explicitly restored public HTML is exposed here. Private archives stay in HyperKitty.
+    {legacy_location}
 }}
 '''
     managed(Path('/etc/nginx/sites-available/postfixer-mailman3'), nginx)
