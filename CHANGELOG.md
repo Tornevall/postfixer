@@ -239,6 +239,11 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 - Ubuntu 18.04 and 20.04 require working legacy repositories or Ubuntu ESM.
 # 2026-11-02 — Optional Mailman 3 Suite
 
+- Integrate optional Mailman selection into the normal installer and add list/
+  membership/archive fetch, inventory and held/private per-list import to the
+  canonical migration runner. Add regression coverage and a synthetic end-to-end
+  import/privacy check; refuse existing-list replacement and serialize imports.
+
 - Add opt-in Suite installation with isolated Python runtime, local PostgreSQL,
   Postorius/HyperKitty, nginx TLS, Core and background worker systemd units.
 - Preserve existing host settings and Postfix maps; reapply list routing during
@@ -246,4 +251,19 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 - Add focused safety/idempotence tests and read-only legacy Mailman staging.
 - Document that historical memberships and archives require explicit recovery;
   installation alone does not migrate them or publish private archives.
+- Verify public list/archive pages, loopback-only APIs and real LMTP routing;
+  pin the tested dependency set (including SQLAlchemy <2.1 compatibility),
+  preserve host configuration byte-for-byte on reinstall and bootstrap the
+  selected domain without creating lists or administrator passwords.
 
+
+## 2026-11-02: Preserve legacy list posting domains
+
+- Allow an explicit MAILMAN_TARGET_DOMAIN during reviewed imports, retaining
+  original addresses for installations with more than one list domain.
+
+## 2026-11-02: Reviewed historical public archives
+
+- Preserve an explicit public-archive directory marker across reinstall; render
+  a read-only Pipermail alias only for a reviewed directory below /var/www,
+  with directory listing and symlink access disabled. Add path-isolation tests.

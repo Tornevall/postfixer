@@ -9,17 +9,19 @@ CERT_DOMAIN ?=
 REMOTE ?=
 REMOTE_HOME_ROOT ?= /home
 MIGRATION_NAME ?= postfix-import
+POSTFIXER_INSTALL_MAILMAN ?= auto
+IMPORT_MAILMAN ?= no
 
 .PHONY: install install-server install-relay apply sync maps aliases cert check status restart reload purge reset backup backup-config backup-mail import-fetch import-users import-auth import-mail import-mail-final import-config import-legacy-submission test help
 
 install:
-	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
+	@POSTFIXER_INSTALL_MAILMAN="$(POSTFIXER_INSTALL_MAILMAN)" MAILMAN_DOMAIN="$(MAILMAN_DOMAIN)" MAILMAN_OWNER="$(MAILMAN_OWNER)" CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
 
 install-server:
-	@POSTFIXER_ROLE_HINT=inout CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
+	@POSTFIXER_ROLE_HINT=inout POSTFIXER_INSTALL_MAILMAN="$(POSTFIXER_INSTALL_MAILMAN)" MAILMAN_DOMAIN="$(MAILMAN_DOMAIN)" MAILMAN_OWNER="$(MAILMAN_OWNER)" CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
 
 install-relay:
-	@POSTFIXER_ROLE_HINT=relay CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
+	@POSTFIXER_ROLE_HINT=relay POSTFIXER_INSTALL_MAILMAN="$(POSTFIXER_INSTALL_MAILMAN)" MAILMAN_DOMAIN="$(MAILMAN_DOMAIN)" MAILMAN_OWNER="$(MAILMAN_OWNER)" CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
 
 apply:
 	@bash $(INSTALLER) --apply
@@ -65,7 +67,7 @@ backup-mail:
 
 import-fetch:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-fetch REMOTE=root@mail.example.com\n' >&2; exit 64; }
-	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch
+	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" IMPORT_MAILMAN="$(IMPORT_MAILMAN)" bash $(IMPORTER) --fetch
 
 import-users:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-users REMOTE=root@mail.example.com\n' >&2; exit 64; }
@@ -91,6 +93,7 @@ import-legacy-submission:
 
 test:
 	@bash tests/profile-install-test.sh
+	@python3 -m unittest discover -s tests -p 'test_mailman3.py'
 
 .PHONY: install-mailman3 check-mailman3 test-mailman3
 install-mailman3:
@@ -104,7 +107,14 @@ test-mailman3:
 
 .PHONY: import-mailman3-fetch
 import-mailman3-fetch:
-	@REMOTE="$(REMOTE)" bash bin/mailman3-fetch.sh
+	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch-mailman
+
+.PHONY: import-mailman3-plan import-mailman3
+import-mailman3-plan:
+	@MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --plan-mailman
+
+import-mailman3:
+	@MIGRATION_NAME="$(MIGRATION_NAME)" MAILMAN_LIST="$(MAILMAN_LIST)" MAILMAN_TARGET_DOMAIN="$(MAILMAN_TARGET_DOMAIN)" MAILMAN_IMPORT_CONFIRM="$(MAILMAN_IMPORT_CONFIRM)" MAILMAN_SOURCE_FROZEN="$(MAILMAN_SOURCE_FROZEN)" bash $(IMPORTER) --import-mailman
 
 help:
 	@printf '%s\n' \
@@ -128,4 +138,9 @@ help:
 		'make import-mail REMOTE=root@host - pre-sync Maildirs without deleting staged files' \
 		'make import-mail-final REMOTE=root@host FINAL_SYNC_CONFIRM=source-frozen - final exact sync after source shutdown' \
 		'make import-config - install safe staged map files under /etc/postfix' \
-		'make test     - run local installer profile tests'
+		'make test     - run local installer profile and Mailman tests' \
+		'make install-mailman3 MAILMAN_DOMAIN=lists.example.net MAILMAN_OWNER=postmaster@example.net CERT_DOMAIN=example.net - opt-in Mailman Suite' \
+		'make check-mailman3 - check list services and HTTPS' \
+		'make import-mailman3-fetch REMOTE=root@old-ip - stage legacy list data without importing' \
+		'make import-mailman3-plan MIGRATION_NAME=name - inventory list configs and archives without executing pickle' \
+		'make import-mailman3 MAILMAN_LIST=list MAILMAN_IMPORT_CONFIRM=reviewed MAILMAN_SOURCE_FROZEN=yes - import held/private'

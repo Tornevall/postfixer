@@ -3,5 +3,8 @@ mailman==3.3.10
 mailman-web==0.0.9
 mailman-hyperkitty==1.2.1
 psycopg2-binary>=2.9,<3
+psycopg[binary]>=3.2,<4
 Whoosh==2.7.4
 Django>=4.2,<5.3
+# Mailman 3.3.10 still uses Select coercion removed in SQLAlchemy 2.1.
+SQLAlchemy>=2.0,<2.1
