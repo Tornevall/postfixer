@@ -239,6 +239,11 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 - Ubuntu 18.04 and 20.04 require working legacy repositories or Ubuntu ESM.
 # 2026-11-02 — Optional Mailman 3 Suite
 
+- Integrate optional Mailman selection into the normal installer and add list/
+  membership/archive fetch, inventory and held/private per-list import to the
+  canonical migration runner. Add regression coverage and a synthetic end-to-end
+  import/privacy check; refuse existing-list replacement and serialize imports.
+
 - Add opt-in Suite installation with isolated Python runtime, local PostgreSQL,
   Postorius/HyperKitty, nginx TLS, Core and background worker systemd units.
 - Preserve existing host settings and Postfix maps; reapply list routing during

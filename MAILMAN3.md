@@ -1,16 +1,26 @@
 # Optional Mailman 3 Suite
 
-Mailman is opt-in. Installing a normal Postfixer server/relay never installs it.
+Mailman is opt-in. A normal Postfixer installation leaves it out unless selected.
 The Suite uses an isolated Python environment, PostgreSQL over local peer
 authentication, Mailman Core, Postorius, HyperKitty, Gunicorn, a Django task
 worker and nginx. No Python 2/Mailman 2 runtime is installed on Noble.
 
 ```sh
+sudo make install-server POSTFIXER_INSTALL_MAILMAN=yes \
+  MAILMAN_DOMAIN=lists.example.net MAILMAN_OWNER=postmaster@example.net \
+  CERT_DOMAIN=example.net
+# Or add it later to an already installed server:
 sudo make install-mailman3 MAILMAN_DOMAIN=lists.example.net \
   MAILMAN_OWNER=postmaster@example.net CERT_DOMAIN=example.net
 sudo make check-mailman3
 make test-mailman3
 ```
+
+The normal interactive installer asks whether to add Mailman, default **no**.
+Non-interactive installation defaults to no unless explicitly enabled with
+`POSTFIXER_INSTALL_MAILMAN=yes`. `POSTFIXER_INSTALL_MAILMAN=no` skips the optional
+step; it never uninstalls an existing list system. Existing Mailman configuration
+is retained without asking again. Relay-only profiles do not offer Mailman.
 
 DNS must already resolve the list host to this server and the externally
 managed certificate under `/etc/letsencrypt/live/CERT_DOMAIN/` must cover it.
@@ -57,21 +67,51 @@ When the original host is reachable:
 
 ```sh
 sudo make import-mailman3-fetch REMOTE=root@ORIGINAL_IP
+sudo make import-mailman3-plan
+# Include it with the ordinary Postfix fetch, using the same migration name:
+sudo make import-fetch REMOTE=root@ORIGINAL_IP MIGRATION_NAME=inbound-1 \
+  IMPORT_MAILMAN=yes
+sudo make import-mailman3-plan MIGRATION_NAME=inbound-1
 ```
 
 Use its original IP, not an alias that now points to the new server. Fetching
-stages data under `/root/postfixer-migration/mailman2/`; it never deletes remote
+stages data under `/root/postfixer-migration/MIGRATION_NAME/mailman2/`; it never deletes remote
 data, imports memberships, starts list delivery, or publishes archives.
 
-Review each list's `config.pck`, owner, moderators, membership and privacy.
-Only trusted source files may be passed to Mailman's `import21` command, since
-the legacy configuration uses Python pickle. Import each list explicitly using
-the installed CLI's `create --help` and `import21 --help`; do not recreate all
-old members automatically or send welcome messages during recovery.
+The canonical migration runner now has `--fetch-mailman`, `--plan-mailman` and
+`--import-mailman` actions. The plan inventories config/mbox/HTML without loading
+pickle data. The fetch includes the complete list/configuration and archive tree,
+including private archives and public HTML symlinks, but never publishes it.
 
-Import the original mbox archives with `mailman-web hyperkitty_import` after
-the corresponding list exists and its archive privacy is verified. Consult
-`hyperkitty_import --help`; import uses a list address and the original mbox.
+Review each list's `config.pck`, owner, moderators, membership and privacy. Only
+trusted source files may be imported because legacy configuration uses Python
+pickle. Freeze the old list service and do a final fetch before import. Then:
+
+```sh
+sudo make import-mailman3 MIGRATION_NAME=inbound-1 MAILMAN_LIST=example-list \
+  MAILMAN_IMPORT_CONFIRM=reviewed MAILMAN_SOURCE_FROZEN=yes
+```
+
+Import selects exactly one staged list, refuses an existing target list, backs up
+both databases/config, and serializes concurrent migration attempts. It stops
+Mailman runners (ordinary Postfix/Courier continue running), imports membership
+and config via `import21`, then reapplies emergency moderation, disables list
+advertising and forces archive privacy before restarting runners. No welcome or
+goodbye messages are enabled. Mbox is imported into HyperKitty if available.
+Sensitive diagnostics and a migration manifest are stored in the root-only
+`/var/backups/postfixer/mailman3-import-*` directory. A failed unverified hold
+leaves Mailman runners stopped for review rather than releasing a partial list.
+The original staging files and backups are retained.
+
+New incoming posts to an imported list are held. After reviewing member counts,
+owners, moderation policy and archive privacy, the operator can release the
+emergency hold and enable advertising in Postorius. Public archive access is a
+separate explicit decision. The migration never switches delivery on automatically.
+
+For archive-only recovery or resuming a reviewed partial migration, use
+`mailman-web hyperkitty_import` with the list address and original mbox; review
+the saved manifest first. The normal importer refuses to overwrite an existing
+list rather than silently re-importing memberships.
 Verify list counts, message counts, dates, attachments and access control before
 enabling delivery. A new installation has no historical archive messages.
 

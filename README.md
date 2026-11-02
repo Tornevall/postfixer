@@ -967,8 +967,11 @@ reviews because source systems differ.
 Those articles describe older generations of the setup that Postfixer is intended to replace.
 # Optional Mailman lists and archives
 
-Mailman 3 support is available through the opt-in `make install-mailman3`
-target. See [MAILMAN3.md](MAILMAN3.md) for installation, service checks,
+The normal server installer offers Mailman 3 as an optional step (default no),
+with `POSTFIXER_INSTALL_MAILMAN=yes` for unattended opt-in. The separate
+`make install-mailman3` target remains available. The canonical migration runner
+includes `--fetch-mailman`, `--plan-mailman` and `--import-mailman`; use
+`IMPORT_MAILMAN=yes` to include lists and archives in the ordinary fetch. See [MAILMAN3.md](MAILMAN3.md) for installation, service checks,
 configuration preservation and the separate recovery of Mailman 2 lists and
 Pipermail/mbox archives. Ordinary server/relay installations remain unchanged.
 

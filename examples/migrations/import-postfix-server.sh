@@ -23,6 +23,9 @@ POSTFIXER_IMPORT_ROOT="${POSTFIXER_IMPORT_ROOT:-/etc/postfix/postfixer.d/imports
 IMPORT_TARGET="${IMPORT_TARGET:-${POSTFIXER_IMPORT_ROOT}/${MIGRATION_NAME}}"
 SSH_BATCH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10)
 RSYNC_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=10'
+MIGRATION_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+POSTFIXER_SOURCE_ROOT="$(cd -- "${MIGRATION_SCRIPT_DIR}/../.." && pwd -P)"
+MAILMAN_STAGE="${MAILMAN_STAGE:-${STAGING_DIR}/mailman2}"
 
 usage() {
     cat <<'EOF_USAGE'
@@ -35,9 +38,20 @@ Usage:
   examples/migrations/import-postfix-server.sh --configure-legacy-submission
   examples/migrations/import-postfix-server.sh --diff-local
   examples/migrations/import-postfix-server.sh --install-modular
+  examples/migrations/import-postfix-server.sh --fetch-mailman
+  examples/migrations/import-postfix-server.sh --plan-mailman
+  examples/migrations/import-postfix-server.sh --import-mailman
 
 Actions:
+  --fetch-mailman   Stage Mailman 2 list configs, memberships and all archives.
+                    No deletion, execution of legacy pickle, or publication.
+  --plan-mailman    Inventory staged lists/archives without reading pickle data.
+  --import-mailman  Import one explicitly selected list and its mbox into the
+                    optional Mailman 3 Suite, held and private for review.
+                    Requires MAILMAN_LIST, MAILMAN_IMPORT_CONFIRM=reviewed and
+                    MAILMAN_SOURCE_FROZEN=yes. Never starts list delivery.
   --fetch           Rsync REMOTE:/etc/postfix into a staging directory outside Git.
+                    Set IMPORT_MAILMAN=yes to also fetch list/archive data.
   --fetch-maildir-users
                     Find every remote REMOTE_HOME_ROOT/*/Maildir and export only
                     matching passwd/shadow entries into staging, mode 0600.
@@ -63,6 +77,8 @@ Defaults:
   TARGET_HOME_ROOT=/home
   STAGING_DIR=/root/postfixer-migration/postfix-import
   IMPORT_TARGET=/etc/postfix/postfixer.d/imports/postfix-import
+  MAILMAN_STAGE=STAGING_DIR/mailman2
+  MAILMAN_LIST=old-list-name (only needed for --import-mailman)
 
 Examples:
   REMOTE=root@old-mail.example.com ./examples/migrations/import-postfix-server.sh --fetch
@@ -86,6 +102,10 @@ Notes:
   Shadow exports are sensitive and are intentionally written outside Git.
   Account authentication is not changed by --fetch-maildir-users alone. Review
   the staged files before using --install-account-auth.
+
+  Mailman is a separate workload: Postfix and Maildir migration do not migrate
+  its memberships, list configuration, mbox archives or Pipermail HTML.
+  Use --fetch-mailman and --plan-mailman even when no Mailman runtime is installed.
 EOF_USAGE
 }
 
@@ -139,6 +159,9 @@ Modular import target:
   ${IMPORT_TARGET}
 
 Review before applying:
+  - Mailman is separate from Postfix/Maildirs. Use IMPORT_MAILMAN=yes when
+    fetching, or run --fetch-mailman and --plan-mailman explicitly. Import
+    selected lists with --import-mailman after the optional runtime is installed.
   - main.cf may contain old node identity and should not be copied blindly.
   - master.cf may contain site-specific services such as extra SMTP ports.
   - mynetworks should point to /etc/postfix/postfixer.d/networks on new installations.
@@ -173,6 +196,10 @@ fetch_remote_postfix() {
         "${REMOTE}:${REMOTE_POSTFIX_DIR}/" \
         "${FETCHED_DIR}/"
     write_report
+    if [[ "${IMPORT_MAILMAN:-no}" == yes ]]; then
+        REMOTE="$REMOTE" MAILMAN_STAGE="$MAILMAN_STAGE" bash "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-fetch.sh"
+        python3 "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-migrate.py" plan --stage "$MAILMAN_STAGE" > "${STAGING_DIR}/mailman-plan.json"
+    fi
     log "Fetched Postfix tree to ${FETCHED_DIR}"
 }
 
@@ -403,6 +430,18 @@ EOF_MANIFEST
 
 main() {
     case "${1:-}" in
+        --fetch-mailman)
+            require_root
+            REMOTE="$REMOTE" MAILMAN_STAGE="$MAILMAN_STAGE" bash "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-fetch.sh"
+            ;;
+        --plan-mailman)
+            require_root
+            python3 "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-migrate.py" plan --stage "$MAILMAN_STAGE"
+            ;;
+        --import-mailman)
+            require_root
+            python3 "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-migrate.py" import --stage "$MAILMAN_STAGE" --list "${MAILMAN_LIST:-}"
+            ;;
         --fetch)
             fetch_remote_postfix
             ;;

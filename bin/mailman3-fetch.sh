@@ -10,5 +10,6 @@ destination="${MAILMAN_STAGE:-/root/postfixer-migration/mailman2}"
 install -d -m 0700 "$destination"
 # Include config.pck, mbox, HTML, membership and private archives together.
 # Do not use --delete, dereference symlinks, or publish this private staging tree.
-rsync -a --numeric-ids -- "$remote:/var/lib/mailman/" "$destination/"
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$remote" test -d /var/lib/mailman
+rsync -a --numeric-ids -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' -- "$remote:/var/lib/mailman/" "$destination/"
 printf 'Staged Mailman 2 data at %s. No lists imported and no archive published.\n' "$destination"
