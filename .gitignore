@@ -6,3 +6,7 @@ etc-postfix/**/*.key
 etc-postfix/**/*.pem
 etc-postfix/**/passwd*
 etc-postfix/**/shadow*
+
+# Generated Python bytecode
+__pycache__/
+*.py[cod]
