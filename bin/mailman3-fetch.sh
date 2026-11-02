@@ -2,7 +2,7 @@
 # Stage the original Mailman 2 data without deleting or importing anything.
 set -Eeuo pipefail
 remote="${REMOTE:?Set REMOTE=user@original-host-or-IP}"
-[[ "$remote" =~ ^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.:-]+$ && "$remote" != -* ]] || {
+[[ "$remote" =~ ^[a-zA-Z0-9_.-]+@[a-zA-Z0-9][a-zA-Z0-9_.:-]*$ && "$remote" != -* ]] || {
     printf 'Invalid SSH source.\n' >&2; exit 64;
 }
 [[ "$EUID" -eq 0 ]] || { printf 'Run as root.\n' >&2; exit 1; }

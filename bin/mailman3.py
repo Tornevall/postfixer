@@ -10,6 +10,12 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
+import base64
+import time
+import urllib.request
+import urllib.error
+import urllib.parse
 
 PREFIX = Path('/opt/postfixer-mailman3')
 CONFIG = Path('/etc/postfixer-mailman3')
@@ -61,8 +67,9 @@ def managed(path, content, mode=0o644):
 
 def as_user(*args, **kwargs):
     kwargs.setdefault('cwd', str(PREFIX))
+    pythonpath = kwargs.pop('pythonpath', str(CONFIG))
     return run('runuser', '-u', USER, '--', 'env',
-               'PYTHONPATH=' + str(CONFIG), 'DJANGO_SETTINGS_MODULE=settings',
+               'PYTHONPATH=' + pythonpath, 'DJANGO_SETTINGS_MODULE=settings',
                'MAILMAN_CONFIG_FILE=' + str(CONFIG / 'mailman.cfg'),
                *args, **kwargs)
 
@@ -104,6 +111,28 @@ def configure_postfix():
         run('postconf', '-e', param + ' = ' + prepend_map(output('postconf', '-h', param), item))
     run('postconf', '-e', 'owner_request_special = no')
     run('postfix', 'check')
+
+
+def ensure_domain(domain):
+    config = configparser.ConfigParser()
+    config.read(CONFIG / 'mailman.cfg')
+    auth = base64.b64encode((config['webservice']['admin_user'] + ':' + config['webservice']['admin_pass']).encode()).decode()
+    headers = {'Authorization': 'Basic ' + auth}
+    for attempt in range(15):
+        try:
+            url = 'http://127.0.0.1:8001/3.1/domains/' + urllib.parse.quote(domain)
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=3):
+                return
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise RuntimeError('Mailman domain lookup failed: HTTP ' + str(e.code)) from None
+            data = urllib.parse.urlencode({'mail_host': domain, 'description': domain}).encode()
+            with urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8001/3.1/domains', headers=headers, data=data), timeout=5):
+                return
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == 14:
+                raise RuntimeError('Mailman REST API did not become available') from None
+            time.sleep(1)
 
 
 def install(domain, owner, cert):
@@ -152,7 +181,8 @@ def install(domain, owner, cert):
     if hba_line not in hba.read_text().splitlines():
         managed(hba, hba_line + '\n' + hba.read_text(), 0o640)
         run('chown', 'postgres:postgres', hba)
-    run('systemctl', 'reload', 'postgresql')
+    run('runuser', '-u', 'postgres', '--', 'psql', '-v', 'ON_ERROR_STOP=1',
+        '-c', 'SELECT pg_reload_conf();', stdout=subprocess.DEVNULL)
     sql = "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='postfixer_mailman') THEN CREATE ROLE postfixer_mailman LOGIN; END IF; END $$;"
     run('runuser', '-u', 'postgres', '--', 'psql', '-v', 'ON_ERROR_STOP=1', '-c', sql, stdout=subprocess.DEVNULL)
     for db in ('mailman3_core', 'mailman3_web'):
@@ -162,16 +192,21 @@ def install(domain, owner, cert):
     if not (VENV / 'bin/python').exists():
         as_user('python3', '-m', 'venv', VENV)
     requirements = Path(__file__).with_name('mailman3-requirements.txt')
+    lock = Path(__file__).with_name('mailman3-requirements.lock')
+    if lock.is_file():
+        requirements = lock
     managed(PREFIX / 'requirements.txt', requirements.read_text())
-    pip = [VENV / 'bin/python', '-m', 'pip']
-    if os.environ.get('MAILMAN_PIP_IPV4') == 'yes':
-        # Optional workaround for hosts with a broken outbound IPv6 route.
-        # This affects only the package installer, never global resolver policy.
-        pip = [VENV / 'bin/python', '-c',
-               'import socket,runpy; original=socket.getaddrinfo; '
-               'socket.getaddrinfo=lambda h,p,f=0,t=0,pr=0,fl=0: original(h,p,socket.AF_INET,t,pr,fl); '
-               'runpy.run_module("pip",run_name="__main__")']
-    as_user(*pip, 'install', '--disable-pip-version-check', '-r', PREFIX / 'requirements.txt')
+    with tempfile.TemporaryDirectory(prefix='pip-network-', dir=PREFIX) as temp:
+        pythonpath = str(CONFIG)
+        if os.environ.get('MAILMAN_PIP_IPV4') == 'yes':
+            # Installer and isolated build subprocesses only, never global policy.
+            Path(temp).chmod(0o755)
+            managed(Path(temp) / 'sitecustomize.py',
+                    'import socket\n_original = socket.getaddrinfo\n'
+                    'socket.getaddrinfo = lambda h,p,f=0,t=0,pr=0,fl=0: _original(h,p,socket.AF_INET,t,pr,fl)\n')
+            pythonpath = temp + ':' + str(CONFIG)
+        as_user(VENV / 'bin/python', '-m', 'pip', 'install', '--disable-pip-version-check',
+                '-r', PREFIX / 'requirements.txt', pythonpath=pythonpath)
     write_new(CONFIG / 'domain', domain + '\n')
     write_new(CONFIG / 'mailman.cfg', f'''[paths.postfixer]
 var_dir: {DATA}
@@ -236,6 +271,11 @@ SITE_ID = 1
     for path in CONFIG.iterdir():
         run('chown', 'root:' + USER, path)
     as_user(VENV / 'bin/mailman', '-C', CONFIG / 'mailman.cfg', 'aliases')
+    run('chmod', '0751', DATA)
+    run('chmod', '0755', MAPS)
+    for path in MAPS.glob('postfix_*'):
+        if path.is_file():
+            path.chmod(0o644)
     as_user(VENV / 'bin/mailman-web', 'migrate', '--noinput')
     as_user(VENV / 'bin/mailman-web', 'collectstatic', '--noinput')
     as_user(VENV / 'bin/mailman-web', 'compress')
@@ -259,7 +299,7 @@ Environment=MAILMAN_CONFIG_FILE={CONFIG}/mailman.cfg
 ExecStart={command}
 {extra}Restart=on-failure
 RestartSec=10
-UMask=0027
+UMask={'0022' if name == 'core' else '0027'}
 [Install]
 WantedBy=multi-user.target
 ''')
@@ -304,6 +344,7 @@ server {{
     run('systemctl', 'daemon-reload')
     for name in ('core', 'web', 'qcluster'):
         run('systemctl', 'enable', '--now', f'postfixer-mailman3-{name}')
+    ensure_domain(domain)
     run('systemctl', 'enable', '--now', 'nginx')
     run('systemctl', 'reload', 'nginx')
     run('systemctl', 'reload', 'postfix')
@@ -315,9 +356,9 @@ def check(domain=None):
     for service in ('core', 'web', 'qcluster'):
         run('systemctl', 'is-active', '--quiet', 'postfixer-mailman3-' + service)
     as_user(VENV / 'bin/mailman-web', 'check')
-    run('curl', '--fail', '--silent', '--show-error', '--retry', '8', '--retry-connrefused', '--retry-delay', '1',
+    run('curl', '--fail', '--location', '--silent', '--show-error', '--retry', '8', '--retry-connrefused', '--retry-delay', '1',
         '--resolve', domain + ':443:127.0.0.1', 'https://' + domain + '/', stdout=subprocess.DEVNULL)
-    print('Mailman core, web, task queue and HTTPS are healthy. Legacy lists/archives are NOT imported.')
+    print('Mailman core, web, task queue and HTTPS are healthy. Historical archive recovery is a separate operation.')
 
 
 def main():

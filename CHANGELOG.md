@@ -246,4 +246,8 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 - Add focused safety/idempotence tests and read-only legacy Mailman staging.
 - Document that historical memberships and archives require explicit recovery;
   installation alone does not migrate them or publish private archives.
+- Verify public list/archive pages, loopback-only APIs and real LMTP routing;
+  pin the tested dependency set (including SQLAlchemy <2.1 compatibility),
+  preserve host configuration byte-for-byte on reinstall and bootstrap the
+  selected domain without creating lists or administrator passwords.
 

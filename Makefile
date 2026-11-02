@@ -91,6 +91,7 @@ import-legacy-submission:
 
 test:
 	@bash tests/profile-install-test.sh
+	@python3 -m unittest discover -s tests -p 'test_mailman3.py'
 
 .PHONY: install-mailman3 check-mailman3 test-mailman3
 install-mailman3:
@@ -128,4 +129,7 @@ help:
 		'make import-mail REMOTE=root@host - pre-sync Maildirs without deleting staged files' \
 		'make import-mail-final REMOTE=root@host FINAL_SYNC_CONFIRM=source-frozen - final exact sync after source shutdown' \
 		'make import-config - install safe staged map files under /etc/postfix' \
-		'make test     - run local installer profile tests'
+		'make test     - run local installer profile and Mailman tests' \
+		'make install-mailman3 MAILMAN_DOMAIN=lists.example.net MAILMAN_OWNER=postmaster@example.net CERT_DOMAIN=example.net - opt-in Mailman Suite' \
+		'make check-mailman3 - check list services and HTTPS' \
+		'make import-mailman3-fetch REMOTE=root@old-ip - stage legacy list data without importing'

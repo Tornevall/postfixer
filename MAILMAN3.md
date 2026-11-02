@@ -91,7 +91,10 @@ mailboxes: they may contain member addresses, private messages and secrets.
 Database dumps and filesystem snapshots must form a reviewed recovery point;
 stop list delivery/task workers for a coordinated final migration snapshot.
 
-Direct package requirements are in `bin/mailman3-requirements.txt`. Changes to
+Direct package requirements are in `bin/mailman3-requirements.txt`; the tested
+resolved versions in `bin/mailman3-requirements.lock` are used when present.
+Set `MAILMAN_PIP_IPV4=yes` for package installation on a host with a broken
+outbound IPv6 route; this does not change system resolver policy. Changes to
 dependencies require a tested upgrade. This install does not alter DNS or the
 separate `mail.example.net` webmail host. Use `journalctl -u SERVICE` and the
 Mailman logs for diagnostics; never print the full config/API credentials.
