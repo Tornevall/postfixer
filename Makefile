@@ -10,7 +10,7 @@ REMOTE ?=
 REMOTE_HOME_ROOT ?= /home
 MIGRATION_NAME ?= postfix-import
 
-.PHONY: install install-server install-relay apply sync maps aliases cert check status restart reload purge reset import-fetch import-users import-auth import-mail import-mail-final import-config test help
+.PHONY: install install-server install-relay apply sync maps aliases cert check status restart reload purge reset backup backup-config backup-mail import-fetch import-users import-auth import-mail import-mail-final import-config import-legacy-submission test help
 
 install:
 	@CERT_DOMAIN="$(CERT_DOMAIN)" bash $(INSTALLER)
@@ -54,6 +54,15 @@ reset:
 
 purge: reset
 
+backup:
+	@bash $(CURDIR)/bin/backup.sh all
+
+backup-config:
+	@bash $(CURDIR)/bin/backup.sh config
+
+backup-mail:
+	@bash $(CURDIR)/bin/backup.sh maildirs
+
 import-fetch:
 	@test -n "$(REMOTE)" || { printf 'Usage: make import-fetch REMOTE=root@mail.example.com\n' >&2; exit 64; }
 	@REMOTE="$(REMOTE)" MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --fetch
@@ -77,8 +86,25 @@ import-mail-final:
 import-config:
 	@MIGRATION_NAME="$(MIGRATION_NAME)" bash $(IMPORTER) --install-modular
 
+import-legacy-submission:
+	@LEGACY_SUBMISSION_CONFIRM="$${LEGACY_SUBMISSION_CONFIRM:-}" bash $(IMPORTER) --configure-legacy-submission
+
 test:
 	@bash tests/profile-install-test.sh
+
+.PHONY: install-mailman3 check-mailman3 test-mailman3
+install-mailman3:
+	@MAILMAN_DOMAIN="$(MAILMAN_DOMAIN)" MAILMAN_OWNER="$(MAILMAN_OWNER)" CERT_DOMAIN="$(CERT_DOMAIN)" python3 bin/mailman3.py install
+
+check-mailman3:
+	@python3 bin/mailman3.py check
+
+test-mailman3:
+	@python3 -m unittest discover -s tests -p 'test_mailman3.py'
+
+.PHONY: import-mailman3-fetch
+import-mailman3-fetch:
+	@REMOTE="$(REMOTE)" bash bin/mailman3-fetch.sh
 
 help:
 	@printf '%s\n' \

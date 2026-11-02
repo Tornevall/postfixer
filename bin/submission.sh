@@ -64,6 +64,10 @@ submission_certificate_ready() {
         [[ -r "/etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/privkey.pem" ]]
 }
 
+plaintext_submission_enabled() {
+    [[ "${POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION:-no}" =~ ^(1|yes|true)$ ]]
+}
+
 configure_submission_service() {
     submission_certificate_ready || die \
         "The ${POSTFIXER_ROLE} profile requires a TLS certificate for SMTP submission. Missing /etc/letsencrypt/live/${POSTFIXER_CERT_DOMAIN}/{fullchain.pem,privkey.pem}."
@@ -72,8 +76,15 @@ configure_submission_service() {
     # is deliberately isolated from port 25 and requires authentication.
     postconf -M 'submission/inet=submission inet n - y - - smtpd'
     postconf -P 'submission/inet/syslog_name=postfix/submission'
-    postconf -P 'submission/inet/smtpd_tls_security_level=encrypt'
-    postconf -P 'submission/inet/smtpd_tls_auth_only=yes'
+    if plaintext_submission_enabled; then
+        # Explicit opt-in for legacy clients that cannot use TLS. STARTTLS is
+        # still advertised, but AUTH is also available before encryption.
+        postconf -P 'submission/inet/smtpd_tls_security_level=may'
+        postconf -P 'submission/inet/smtpd_tls_auth_only=no'
+    else
+        postconf -P 'submission/inet/smtpd_tls_security_level=encrypt'
+        postconf -P 'submission/inet/smtpd_tls_auth_only=yes'
+    fi
     postconf -P 'submission/inet/smtpd_sasl_auth_enable=yes'
     postconf -P 'submission/inet/smtpd_sasl_type=cyrus'
     postconf -P 'submission/inet/smtpd_sasl_path=smtpd'
@@ -134,7 +145,12 @@ check_submission_protocol() {
         failed=1
     fi
 
-    if grep -Eq '^250[- ]AUTH([ =]|$)' <<<"$plain"; then
+    if plaintext_submission_enabled; then
+        if ! grep -Eq '^250[- ]AUTH([ =]|$)' <<<"$plain"; then
+            warn "Legacy plaintext submission is enabled but port 587 does not advertise AUTH."
+            failed=1
+        fi
+    elif grep -Eq '^250[- ]AUTH([ =]|$)' <<<"$plain"; then
         warn "Port 587 advertises AUTH before STARTTLS."
         failed=1
     fi
@@ -185,9 +201,15 @@ check_submission_configuration() {
         done
     fi
 
+    local submission_tls_level=encrypt submission_tls_auth_only=yes
+    if plaintext_submission_enabled; then
+        submission_tls_level=may
+        submission_tls_auth_only=no
+    fi
+
     for spec in \
-        'smtpd_tls_security_level=encrypt' \
-        'smtpd_tls_auth_only=yes' \
+        "smtpd_tls_security_level=${submission_tls_level}" \
+        "smtpd_tls_auth_only=${submission_tls_auth_only}" \
         'smtpd_sasl_auth_enable=yes' \
         'smtpd_sasl_type=cyrus' \
         'smtpd_sasl_path=smtpd' \

@@ -6,6 +6,34 @@ All notable changes to Postfixer are documented in this file.
 
 ### Changed
 
+- Added separate root-only configuration and Maildir backup commands through
+  `bin/backup.sh` and `make backup`, `make backup-config` and `make backup-mail`.
+  Backups preserve ownership, ACLs and extended attributes and include only
+  `/home` accounts with a Maildir.
+- Added the separate Tornevall-system mail backup runner for inbound hosts. It
+  writes Maildir and mail-configuration archives below the existing backup
+  store's `.../<host>/mail/` branch and has its own cron entry and completion
+  marker, independent of file and SQL backups.
+- Added active Postfix map validation: `make check` now detects missing or stale
+  `hash:` databases and missing plain list files, while `make maps` remains the
+  canonical rebuild operation after virtual-alias or transport changes.
+- Added an installed `/etc/postfix/Makefile` for rebuilding aliases, virtual
+  aliases and transport maps, validating the configuration and reloading
+  Postfix. This is also the intended narrow maintenance entry point for the
+  future ToolsAPI integration.
+- Hardened OpenDKIM permission normalization for nested key directories and the
+  `default.private` key, and documented the personal system-repository links
+  used for OpenDKIM and SpamAssassin.
+- Enabled the packaged SpamAssassin maintenance timer during installation when
+  available. Signed generated rule data remains under `/var/lib/spamassassin`,
+  while local configuration and Razor data remain versioned in the system repo.
+
+- Added an explicit `POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=yes` compatibility
+  switch for legacy SMTP clients that cannot use TLS on port 587. The default
+  remains mandatory STARTTLS; the opt-in mode is documented as insecure and
+  limited to authenticated submission. The migration importer can persist the
+  reviewed exception and `make apply` can reproduce it on the target.
+
 - Hardened OpenDKIM maintenance and migration handling: external trees and
   Git-restored keys are normalized to `opendkim:opendkim` with private keys at
   `0600` and tables at `0640`; `make check` now detects unsafe permissions and
@@ -209,3 +237,13 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
 - Maildir transfers are staged outside Git; account creation and final restore
   remain deliberate administrator actions.
 - Ubuntu 18.04 and 20.04 require working legacy repositories or Ubuntu ESM.
+# 2026-11-02 — Optional Mailman 3 Suite
+
+- Add opt-in Suite installation with isolated Python runtime, local PostgreSQL,
+  Postorius/HyperKitty, nginx TLS, Core and background worker systemd units.
+- Preserve existing host settings and Postfix maps; reapply list routing during
+  normal Postfixer configuration and validate list recipients.
+- Add focused safety/idempotence tests and read-only legacy Mailman staging.
+- Document that historical memberships and archives require explicit recovery;
+  installation alone does not migrate them or publish private archives.
+

@@ -22,6 +22,12 @@ POSTFIXER_FALLBACK_RELAYS=
 # Certificate is managed externally and synchronized below /etc/letsencrypt.
 POSTFIXER_CERT_DOMAIN=mail.example.com
 
+# Optional and insecure compatibility mode for legacy clients that cannot use
+# TLS. AUTH is then advertised before STARTTLS on port 587. Keep disabled for
+# normal installations; use only when an old client (for example Outlook
+# Express) cannot be migrated.
+# POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=yes
+
 POSTFIXER_NETWORKS_FILE=/etc/postfix/postfixer.d/networks
 POSTFIXER_LOCAL_DOMAINS_FILE=/etc/postfix/postfixer.d/local-domains
 POSTFIXER_RELAY_DOMAINS_FILE=/etc/postfix/postfixer.d/relay-domains

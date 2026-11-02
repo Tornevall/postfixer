@@ -1,0 +1,2 @@
+# Separate mailbox/configuration backup; independent of files and SQL jobs.
+0 1 * * * root flock -n /var/run/autorun.backup.mail.lock bash /var/tornevall/system/etc/rc/autorun.backup.mail.sh >/dev/null 2>&1 || true

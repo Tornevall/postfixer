@@ -19,4 +19,7 @@ source "${BIN_DIR}/customizer.sh"
 # shellcheck source=submission.sh
 source "${BIN_DIR}/submission.sh"
 
+# Opt-in Mailman configuration is reapplied only on hosts with its config.
+source "${BIN_DIR}/mailman3.sh"
+
 main "$@"

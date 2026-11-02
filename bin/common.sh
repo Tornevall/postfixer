@@ -488,6 +488,43 @@ rebuild_postfix_maps() {
     fi
 }
 
+check_postfix_maps() {
+    local parameter value token path db failed=0
+
+    for parameter in virtual_alias_domains virtual_alias_maps virtual_mailbox_domains virtual_mailbox_maps transport_maps relay_domains relay_recipient_maps; do
+        value="$(postconf -h "$parameter" 2>/dev/null || true)"
+        [[ -n "$value" ]] || continue
+
+        while IFS= read -r token; do
+            [[ -n "$token" ]] || continue
+            case "$token" in
+                hash:*)
+                    path="${token#hash:}"
+                    db="${path}.db"
+                    if [[ ! -f "$path" ]]; then
+                        warn "Postfix map source is missing: ${path} (${parameter})"
+                        failed=1
+                    elif [[ ! -f "$db" ]]; then
+                        warn "Postfix map database is missing: ${db} (${parameter}); run make maps."
+                        failed=1
+                    elif [[ "$path" -nt "$db" ]]; then
+                        warn "Postfix map database is older than its source: ${db}; run make maps."
+                        failed=1
+                    fi
+                    ;;
+                /*)
+                    if [[ ! -f "$token" ]]; then
+                        warn "Postfix list/map source is missing: ${token} (${parameter})"
+                        failed=1
+                    fi
+                    ;;
+            esac
+        done < <(tr ', ' '\n' <<<"$value")
+    done
+
+    return "$failed"
+}
+
 detect_cert_domain() {
     local cert_file=""
 

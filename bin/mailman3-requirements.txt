@@ -1,0 +1,7 @@
+# Direct dependencies are pinned; resolved installation is recorded in pip-freeze.txt.
+mailman==3.3.10
+mailman-web==0.0.9
+mailman-hyperkitty==1.2.1
+psycopg2-binary>=2.9,<3
+Whoosh==2.7.4
+Django>=4.2,<5.3

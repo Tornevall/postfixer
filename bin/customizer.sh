@@ -383,6 +383,13 @@ configure_spamassassin_node() {
     set_equals_value "$defaults_file" OPTIONS '"--create-prefs --max-children 5 --helper-home-dir -i 127.0.0.1"'
     set_equals_value "$defaults_file" CRON 1
 
+    # Ubuntu Noble's SpamAssassin package does not ship Hashcash.pm, while
+    # init.pre may still enable it. Keep the package usable without making
+    # Hashcash a prerequisite for the local filter stack.
+    if [[ -f /etc/spamassassin/init.pre ]]; then
+        sed -i -E 's|^[[:space:]]*(loadplugin[[:space:]]+Mail::SpamAssassin::Plugin::Hashcash)|# Postfixer: unavailable on this package: \1|' /etc/spamassassin/init.pre
+    fi
+
     postconf -M "spamassassin/unix=spamassassin unix - n n - - pipe flags=Rq user=debian-spamd argv=/usr/bin/spamc -f -n 10 -t 120 -d ${POSTFIXER_SPAMD_HOSTS} -e /usr/sbin/sendmail -oi -f \${sender} \${recipient}"
     postconf -P 'smtp/inet/content_filter=spamassassin'
 }
@@ -494,7 +501,9 @@ normalize_opendkim_permissions() {
 
     [[ -d "$d" ]] || return 0
     install -d -o opendkim -g opendkim -m 0750 "$d"
-    [[ -d "$d/keys" ]] && install -d -o opendkim -g opendkim -m 0700 "$d/keys"
+    if [[ -d "$d/keys" ]]; then
+        find "$d/keys" -type d -exec chown opendkim:opendkim {} + -exec chmod 0700 {} + 2>/dev/null || true
+    fi
 
     for file in "$d/key.table" "$d/signing.table" "$d/trusted.hosts"; do
         [[ -f "$file" ]] || continue
@@ -506,6 +515,11 @@ normalize_opendkim_permissions() {
         find "$d/keys" -type f -name '*.private' \
             -exec chown opendkim:opendkim {} + \
             -exec chmod 0600 {} + 2>/dev/null || true
+    fi
+
+    if [[ -f "$d/default.private" ]]; then
+        chown opendkim:opendkim "$d/default.private"
+        chmod 0600 "$d/default.private"
     fi
 }
 
@@ -525,6 +539,12 @@ check_opendkim_permissions() {
         [[ "$owner:$group" == opendkim:opendkim && "$mode" == 600 ]] || \
             die "Unsafe OpenDKIM private-key permissions: ${file} (${owner}:${group} ${mode}). Run make apply."
     done < <(find "$d/keys" -type f -name '*.private' 2>/dev/null)
+
+    if [[ -f "$d/default.private" ]]; then
+        read -r owner group mode < <(stat -c '%U %G %a' "$d/default.private")
+        [[ "$owner:$group" == opendkim:opendkim && "$mode" == 600 ]] || \
+            die "Unsafe OpenDKIM default private-key permissions: ${d}/default.private (${owner}:${group} ${mode}). Run make apply."
+    fi
 }
 
 link_tornevall_letsencrypt_tree() {
@@ -661,6 +681,11 @@ enable_and_restart_services() {
         fi
     done
 
+    if systemctl list-unit-files spamassassin-maintenance.timer >/dev/null 2>&1; then
+        systemctl enable --now spamassassin-maintenance.timer >/dev/null 2>&1 || \
+            warn "Could not enable SpamAssassin rule-update timer."
+    fi
+
     if [[ "$POSTFIXER_ROLE" == relay ]]; then
         for service in courier-authdaemon courier-imap courier-imap-ssl courier-pop courier-pop-ssl; do
             service_exists "$service" && systemctl disable --now "$service.service" >/dev/null 2>&1 || true
@@ -677,6 +702,9 @@ check_mail_stack() {
 
     postfix check
     postconf -n >/dev/null
+    if ! check_postfix_maps; then
+        failed=1
+    fi
 
     if ! postconf -M policyd-spf/unix >/dev/null 2>&1; then
         warn "Postfix policyd-spf service is missing from master.cf."

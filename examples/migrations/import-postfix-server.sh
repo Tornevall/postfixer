@@ -18,6 +18,7 @@ REPORT_FILE="${REPORT_FILE:-${STAGING_DIR}/README.migration}"
 MAILDIR_STAGING_DIR="${MAILDIR_STAGING_DIR:-${STAGING_DIR}/maildirs}"
 FINAL_SYNC_CONFIRM="${FINAL_SYNC_CONFIRM:-}"
 ACCOUNT_AUTH_CONFIRM="${ACCOUNT_AUTH_CONFIRM:-}"
+LEGACY_SUBMISSION_CONFIRM="${LEGACY_SUBMISSION_CONFIRM:-}"
 POSTFIXER_IMPORT_ROOT="${POSTFIXER_IMPORT_ROOT:-/etc/postfix/postfixer.d/imports}"
 IMPORT_TARGET="${IMPORT_TARGET:-${POSTFIXER_IMPORT_ROOT}/${MIGRATION_NAME}}"
 SSH_BATCH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=10)
@@ -31,6 +32,7 @@ Usage:
   examples/migrations/import-postfix-server.sh --fetch-maildirs
   examples/migrations/import-postfix-server.sh --fetch-maildirs-final
   examples/migrations/import-postfix-server.sh --install-account-auth
+  examples/migrations/import-postfix-server.sh --configure-legacy-submission
   examples/migrations/import-postfix-server.sh --diff-local
   examples/migrations/import-postfix-server.sh --install-modular
 
@@ -46,6 +48,9 @@ Actions:
   --install-account-auth
                     Install reviewed shadow hashes for existing Maildir accounts.
                     Requires ACCOUNT_AUTH_CONFIRM=reviewed.
+  --configure-legacy-submission
+                    Persist the explicit legacy SMTP compatibility mode for port
+                    587. Requires LEGACY_SUBMISSION_CONFIRM=reviewed.
   --diff-local      Diff fetched files against local /etc/postfix.
   --install-modular Install non-secret map files below /etc/postfix/postfixer.d/imports.
 
@@ -66,6 +71,8 @@ Examples:
   FINAL_SYNC_CONFIRM=source-frozen REMOTE=root@old-mail.example.com \
     ./examples/migrations/import-postfix-server.sh --fetch-maildirs-final
   ./examples/migrations/import-postfix-server.sh --diff-local
+  LEGACY_SUBMISSION_CONFIRM=reviewed \
+    sudo ./examples/migrations/import-postfix-server.sh --configure-legacy-submission
   sudo ./examples/migrations/import-postfix-server.sh --install-modular
 
 Notes:
@@ -320,6 +327,24 @@ install_account_auth() {
     done < "$passwd_file"
 }
 
+configure_legacy_submission() {
+    local config="${POSTFIXER_CONFIG:-/etc/postfix/postfixer.d/postfixer.conf}"
+
+    require_root
+    [[ "$LEGACY_SUBMISSION_CONFIRM" == reviewed ]] || die \
+        "Legacy plaintext submission requires LEGACY_SUBMISSION_CONFIRM=reviewed."
+    [[ -f "$config" ]] || die "Missing Postfixer config: ${config}. Run the installer first."
+
+    if grep -q '^POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=' "$config"; then
+        sed -i 's/^POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=.*/POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=yes/' "$config"
+    else
+        printf '\n# Explicit migration exception for clients that cannot use TLS.\nPOSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=yes\n' >> "$config"
+    fi
+
+    log "Enabled legacy plaintext SMTP submission in ${config}"
+    warn "Run make apply after reviewing the change. Port 587 will advertise AUTH before STARTTLS."
+}
+
 install_modular() {
     local file
     local manifest="${IMPORT_TARGET}/README.import"
@@ -392,6 +417,9 @@ main() {
             ;;
         --install-account-auth)
             install_account_auth
+            ;;
+        --configure-legacy-submission)
+            configure_legacy_submission
             ;;
         --diff-local)
             diff_local_postfix

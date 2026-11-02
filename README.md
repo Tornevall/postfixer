@@ -325,6 +325,86 @@ and advertises `AUTH PLAIN LOGIN` only inside the encrypted session. Port 587
 remains the preferred modern endpoint using explicit STARTTLS; port 25 remains
 unauthenticated server-to-server SMTP.
 
+For a deliberately legacy installation, set
+`POSTFIXER_ALLOW_PLAINTEXT_SUBMISSION=yes` in the managed Postfixer
+configuration. This changes only port 587 to optional TLS and advertises AUTH
+before STARTTLS, allowing clients that cannot encrypt SMTP at all. It exposes
+passwords on the network and is disabled by default; use it only as a temporary
+migration exception. During a migration it can be persisted and reviewed with:
+
+```bash
+LEGACY_SUBMISSION_CONFIRM=reviewed \
+  sudo ./examples/migrations/import-postfix-server.sh \
+  --configure-legacy-submission
+sudo make apply
+```
+
+The importer does not enable this mode implicitly from an old `master.cf`; the
+exception must be explicitly confirmed.
+
+The personal Tornevall profile may link `/etc/opendkim` and
+`/etc/spamassassin` into `/var/tornevall/system/etc`. The installer keeps this
+opt-in behavior separate from generic installations. OpenDKIM private keys,
+including `default.private`, are normalized to `opendkim:opendkim` mode `0600`;
+key directories are mode `0700`, and signing/trusted tables are mode `0640`.
+
+SpamAssassin configuration and local Razor data can likewise live in the
+system repository. Generated rule channels from `sa-update` are intentionally
+kept in `/var/lib/spamassassin`, not Git. The installer enables the packaged
+`spamassassin-maintenance.timer` when it is available; it runs daily and
+refreshes the signed rule channel without replacing `local.cf`.
+
+## Applying virtual aliases and domains
+
+Postfix does not watch text and `hash:` map files. After changing aliases,
+virtual domains or transport routes, run:
+
+```bash
+sudo make -C /etc/postfix
+```
+
+This rebuilds `/etc/aliases.db`, `postfixer.d/virtual/aliases.db` and
+`postfixer.d/transport.db` when applicable, validates Postfix and reloads it.
+The same command is intended as the privileged operation exposed later to
+ToolsAPI; the API should not edit `.db` files directly.
+
+## Backups
+
+Postfixer provides separate backups for service configuration and mailbox data.
+Run them as root and preferably set `BACKUP_ROOT` to a mounted, protected disk:
+
+```bash
+sudo BACKUP_ROOT=/mnt/mail-backups/postfixer make backup
+sudo BACKUP_ROOT=/mnt/mail-backups/postfixer make backup-config
+sudo BACKUP_ROOT=/mnt/mail-backups/postfixer make backup-mail
+```
+
+The configuration archive includes Postfix, Courier, SASL/PAM, Unix account
+databases, OpenDKIM, SpamAssassin, certificates and `/etc/letsencrypt`. The
+Maildir archive includes only `/home/*/Maildir` trees, preserving numeric
+ownership, ACLs and extended attributes. Archives are mode `0600`; they contain
+password hashes, private keys and mail and must be encrypted or stored on
+restricted backup media. The scripts create archives only and never delete old
+backups.
+
+### Tornevall system backup integration
+
+On the personal `inbound.tornevall.net` host, a separate legacy backup runner
+is installed as `/var/tornevall/system/etc/rc/autorun.backup.mail.sh`. It uses
+the existing `default-backup-store` and writes below:
+
+```text
+/mnt/share04/Backup/Auto/inbound.tornevall.net/mail/
+```
+
+It creates separate Maildir and mail-configuration archives, keeps its own
+`last.mail` marker, and is scheduled independently from the ordinary file and
+SQL jobs. Verify it without creating an archive using:
+
+```bash
+bash /var/tornevall/system/etc/rc/autorun.backup.mail.sh --dry-run
+```
+
 ## TLS policy
 
 Certificates are not issued by Postfixer.
@@ -885,3 +965,10 @@ reviews because source systems differ.
 - [Postfix smtpauth and clients without imap/pop-auth](https://www.tornevalls.se/postfix-smtpauth-and-clients-without-imap-pop-auth/)
 
 Those articles describe older generations of the setup that Postfixer is intended to replace.
+# Optional Mailman lists and archives
+
+Mailman 3 support is available through the opt-in `make install-mailman3`
+target. See [MAILMAN3.md](MAILMAN3.md) for installation, service checks,
+configuration preservation and the separate recovery of Mailman 2 lists and
+Pipermail/mbox archives. Ordinary server/relay installations remain unchanged.
+

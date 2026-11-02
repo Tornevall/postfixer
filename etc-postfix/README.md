@@ -25,6 +25,26 @@ Do not rely on old SMTP AUTH or submission settings in a copied `main.cf`, `mast
 
 `sudo make apply` copies the directory tree into `/etc/postfix`, rebuilds referenced `hash:` maps, reapplies node and submission settings, validates Postfix, and reloads the service.
 
+`make maps` is the canonical rebuild operation after changing virtual aliases,
+transport routes or other hash-backed maps. `make check` verifies that active
+map sources exist, generated `.db` files exist and are not older than their
+sources. Plain list files such as
+`virtual_alias_domains = /etc/postfix/postfixer.d/virtual/domains` intentionally
+do not have a `.db` companion.
+
+The installed `/etc/postfix/Makefile` is the single maintenance entry point for
+local tools and future ToolsAPI integration:
+
+```bash
+sudo make -C /etc/postfix       # rebuild maps, validate and reload
+sudo make -C /etc/postfix maps  # rebuild generated databases only
+sudo make -C /etc/postfix check
+```
+
+Postfix does not watch these source files. Changes to `virtual/aliases`,
+`/etc/aliases` or `transport` require the corresponding map rebuild; changes to
+plain virtual-domain or regexp lists require a Postfix reload.
+
 `README.md` and `.gitkeep` are never copied into `/etc/postfix`.
 
 Do not commit passwords, private DKIM keys, private TLS keys, API tokens or other credentials to this repository.
