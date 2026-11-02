@@ -69,7 +69,7 @@ def as_user(*args, **kwargs):
                *args, cwd=PREFIX, **kwargs)
 
 
-def import_list(stage, name):
+def import_list(stage, name, domain=None):
     valid_list(name)
     if os.environ.get('MAILMAN_IMPORT_CONFIRM') != 'reviewed' or os.environ.get('MAILMAN_SOURCE_FROZEN') != 'yes':
         raise ValueError('Review trusted pickle data and freeze the original list service first; set MAILMAN_IMPORT_CONFIRM=reviewed MAILMAN_SOURCE_FROZEN=yes')
@@ -78,7 +78,9 @@ def import_list(stage, name):
     item = next((row for row in inventory(stage) if row['list'] == name), None)
     if item is None:
         raise ValueError('Selected list is not in the staged inventory')
-    domain = (CONFIG / 'domain').read_text().strip()
+    domain = domain or (CONFIG / 'domain').read_text().strip()
+    if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', domain):
+        raise ValueError('Invalid target list domain')
     address = name + '@' + domain
     if not re.fullmatch(r'[a-z0-9_.+-]+@[a-z0-9.-]+\.[a-z0-9-]+', address):
         raise ValueError('Invalid target list address')
@@ -161,6 +163,7 @@ def main():
     parser.add_argument('action', choices=['plan', 'import'])
     parser.add_argument('--stage', type=Path, required=True)
     parser.add_argument('--list', default='')
+    parser.add_argument('--domain', default=os.environ.get('MAILMAN_TARGET_DOMAIN'))
     args = parser.parse_args()
     if os.geteuid():
         parser.error('Run as root')
@@ -174,7 +177,7 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 parser.error('Another Mailman migration is already running')
-            import_list(args.stage, args.list)
+            import_list(args.stage, args.list, args.domain)
 
 
 if __name__ == '__main__':

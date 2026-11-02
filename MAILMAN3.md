@@ -138,3 +138,12 @@ outbound IPv6 route; this does not change system resolver policy. Changes to
 dependencies require a tested upgrade. This install does not alter DNS or the
 separate `mail.example.net` webmail host. Use `journalctl -u SERVICE` and the
 Mailman logs for diagnostics; never print the full config/API credentials.
+
+### Preserving additional list domains
+
+Set `MAILMAN_TARGET_DOMAIN=lists.original-domain.example` with
+`make import-mailman3` when a legacy list belongs to another posting domain.
+Review its original `host_name` before importing; never collapse separate list
+domains into the installer default. The importer registers the selected domain
+without enabling public archives or releasing the moderation hold. DNS/MX for
+that domain must separately reach this mail server.

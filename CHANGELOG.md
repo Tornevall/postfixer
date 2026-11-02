@@ -256,3 +256,8 @@ provides a tested installer for hybrid mailbox servers and relay-only nodes.
   preserve host configuration byte-for-byte on reinstall and bootstrap the
   selected domain without creating lists or administrator passwords.
 
+
+## 2026-11-02: Preserve legacy list posting domains
+
+- Allow an explicit MAILMAN_TARGET_DOMAIN during reviewed imports, retaining
+  original addresses for installations with more than one list domain.
