@@ -92,6 +92,7 @@ import-legacy-submission:
 	@LEGACY_SUBMISSION_CONFIRM="$${LEGACY_SUBMISSION_CONFIRM:-}" bash $(IMPORTER) --configure-legacy-submission
 
 test:
+	@bash tests/postgrey-test.sh
 	@bash tests/profile-install-test.sh
 	@python3 -m unittest discover -s tests -p 'test_mailman3.py'
 

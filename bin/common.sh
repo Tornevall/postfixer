@@ -138,8 +138,8 @@ backup_existing_configuration() {
     local copied=0
 
     for path in \
-        /etc/postfix /etc/courier \
-        /etc/default/saslauthd /etc/default/spamassassin /etc/default/spamd /etc/spamassassin \
+        /etc/postfix /etc/courier /etc/postgrey \
+        /etc/default/postgrey /etc/default/saslauthd /etc/default/spamassassin /etc/default/spamd /etc/spamassassin \
         /etc/pam.d/imap /etc/pam.d/pop3; do
         [[ -e "$path" || -L "$path" ]] || continue
 

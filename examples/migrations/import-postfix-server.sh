@@ -26,6 +26,8 @@ RSYNC_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=10'
 MIGRATION_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 POSTFIXER_SOURCE_ROOT="$(cd -- "${MIGRATION_SCRIPT_DIR}/../.." && pwd -P)"
 MAILMAN_STAGE="${MAILMAN_STAGE:-${STAGING_DIR}/mailman2}"
+FETCHED_POSTGREY_WHITELIST_CLIENTS="${FETCHED_POSTGREY_WHITELIST_CLIENTS:-${STAGING_DIR}/fetched/postgrey/whitelist_clients.local}"
+source "${POSTFIXER_SOURCE_ROOT}/bin/postgrey.sh"
 
 usage() {
     cat <<'EOF_USAGE'
@@ -50,7 +52,8 @@ Actions:
                     optional Mailman 3 Suite, held and private for review.
                     Requires MAILMAN_LIST, MAILMAN_IMPORT_CONFIRM=reviewed and
                     MAILMAN_SOURCE_FROZEN=yes. Never starts list delivery.
-  --fetch           Rsync REMOTE:/etc/postfix into a staging directory outside Git.
+  --fetch           Rsync REMOTE:/etc/postfix and copy the dereferenced Postgrey
+                    local client whitelist into a staging directory outside Git.
                     Set IMPORT_MAILMAN=yes to also fetch list/archive data.
   --fetch-maildir-users
                     Find every remote REMOTE_HOME_ROOT/*/Maildir and export only
@@ -172,6 +175,8 @@ Review before applying:
     installer reapplies opendkim:opendkim ownership and mode 0600.
   - Run make check after the DKIM permission repair; it fails closed on unsafe
     private-key or table permissions before production cutover.
+  - Postgrey client whitelist additions are staged separately at
+    ${FETCHED_POSTGREY_WHITELIST_CLIENTS}. Existing target rules and symlinks win.
   - Run spamassassin --lint on the target after importing any local SpamAssassin
     profile. Ubuntu Noble no longer ships every SpamAssassin 3 plugin; disable
     or port unavailable plugins such as Hashcash, and review trusted_networks
@@ -195,6 +200,24 @@ fetch_remote_postfix() {
         --exclude 'prng_exch' \
         "${REMOTE}:${REMOTE_POSTFIX_DIR}/" \
         "${FETCHED_DIR}/"
+    # Read through an active symlink but never reproduce its site-specific path.
+    local postgrey_temporary
+    mkdir -p "$(dirname "$FETCHED_POSTGREY_WHITELIST_CLIENTS")"
+    postgrey_temporary="$(mktemp "${FETCHED_POSTGREY_WHITELIST_CLIENTS}.XXXXXX")"
+    if ! ssh "${SSH_BATCH_OPTIONS[@]}" "$REMOTE" 'set -e
+        if [ -f /etc/postgrey/whitelist_clients.local ]; then
+            cat /etc/postgrey/whitelist_clients.local
+        fi' > "$postgrey_temporary"; then
+        rm -f "$postgrey_temporary"
+        die "Could not fetch source Postgrey client whitelist; staging is incomplete."
+    fi
+    if [[ -s "$postgrey_temporary" ]]; then
+        mv -f "$postgrey_temporary" "$FETCHED_POSTGREY_WHITELIST_CLIENTS"
+        chmod 0600 "$FETCHED_POSTGREY_WHITELIST_CLIENTS"
+    else
+        rm -f "$postgrey_temporary" "$FETCHED_POSTGREY_WHITELIST_CLIENTS"
+        warn "No source Postgrey client whitelist found."
+    fi
     write_report
     if [[ "${IMPORT_MAILMAN:-no}" == yes ]]; then
         REMOTE="$REMOTE" MAILMAN_STAGE="$MAILMAN_STAGE" bash "${POSTFIXER_SOURCE_ROOT}/bin/mailman3-fetch.sh"
@@ -402,6 +425,13 @@ install_modular() {
         find "${IMPORT_TARGET}/virtual" -type f -exec chmod 0640 {} +
     fi
 
+    if [[ -f "$FETCHED_POSTGREY_WHITELIST_CLIENTS" ]]; then
+        install -d -m 0750 "${IMPORT_TARGET}/postgrey"
+        install -m 0644 "$FETCHED_POSTGREY_WHITELIST_CLIENTS" \
+            "${IMPORT_TARGET}/postgrey/whitelist_clients.local"
+        install_postgrey_client_whitelist "${IMPORT_TARGET}/postgrey/whitelist_clients.local"
+    fi
+
     cat > "$manifest" <<EOF_MANIFEST
 Postfixer modular import: ${MIGRATION_NAME}
 
@@ -416,6 +446,11 @@ explicit main.cf map reference. Common managed destinations are:
   relay recipients    /etc/postfix/postfixer.d/relay-recipients
   transport routes    /etc/postfix/postfixer.d/transport
   local domains       /etc/postfix/postfixer.d/local-domains
+
+Postgrey client whitelist additions, when available, are included below
+postgrey/whitelist_clients.local. A missing active local whitelist is installed
+under /etc/postgrey. Existing regular files and symlinks are preserved; review
+differences against the imported copy. Restart Postgrey after activating changes.
 
 Run postmap for hash: maps after editing, then run make check and make reload
 from the Postfixer checkout. Never activate imported credentials, private keys,

@@ -45,7 +45,9 @@ archive_config() {
         /etc/courier \
         /etc/courier-imap \
         /etc/opendkim \
+        /etc/postgrey \
         /etc/spamassassin \
+        /etc/default/postgrey \
         /etc/default/saslauthd \
         /etc/pam.d/smtp \
         /etc/aliases \
